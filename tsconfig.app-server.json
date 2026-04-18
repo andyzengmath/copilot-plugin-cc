@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "useUnknownInCatchVariables": false,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "plugins/copilot/scripts/lib/acp-client.mjs",
+    "plugins/copilot/scripts/lib/copilot.mjs",
+    "plugins/copilot/scripts/lib/fs.mjs",
+    "plugins/copilot/scripts/lib/process.mjs",
+    "plugins/copilot/scripts/lib/acp-protocol.d.ts"
+  ]
+}
