@@ -60,6 +60,31 @@ function readScript() {
 
 const script = readScript();
 
+// Record the spawn argv + selected env so tests can assert how the plugin
+// invoked us (e.g., that `--model claude-opus-4.6` was appended).
+const spawnLogPath = process.env.FAKE_COPILOT_SPAWN_LOG;
+if (spawnLogPath) {
+  try {
+    fs.writeFileSync(
+      spawnLogPath,
+      JSON.stringify(
+        {
+          argv: process.argv.slice(2),
+          env: {
+            COPILOT_COMPANION_SESSION_ID: process.env.COPILOT_COMPANION_SESSION_ID ?? null,
+            COPILOT_COMPANION_ACP_ENDPOINT: process.env.COPILOT_COMPANION_ACP_ENDPOINT ?? null
+          }
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+  } catch {
+    // Best effort — don't crash the fixture if the log path is bad.
+  }
+}
+
 const DEFAULT_INITIALIZE = {
   protocolVersion: 1,
   agentCapabilities: {
