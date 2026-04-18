@@ -29,7 +29,7 @@ that swaps the underlying runtime: `codex app-server` is replaced by
 Add the marketplace in Claude Code:
 
 ```bash
-/plugin marketplace add <this-repo>
+/plugin marketplace add andyzengmath/copilot-plugin-cc
 ```
 
 Install the plugin:

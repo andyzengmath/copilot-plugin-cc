@@ -302,8 +302,6 @@ export function getCopilotAvailability(cwd) {
   };
 }
 
-// Legacy alias so companion.mjs ports without touching the name everywhere.
-export const getCodexAvailability = getCopilotAvailability;
 
 export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) {
   const endpoint = env?.[BROKER_ENDPOINT_ENV] ?? loadBrokerSession(cwd)?.endpoint ?? null;
@@ -390,8 +388,6 @@ export async function getCopilotAuthStatus(cwd, options = {}) {
   });
 }
 
-// Legacy alias.
-export const getCodexAuthStatus = getCopilotAuthStatus;
 
 export async function interruptAppServerTurn(cwd, { threadId, turnId }) {
   if (!threadId) {
