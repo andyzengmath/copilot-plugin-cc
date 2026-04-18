@@ -70,7 +70,7 @@ function createProtocolError(message, data) {
   return error;
 }
 
-function firstAllowOption(options = []) {
+export function firstAllowOption(options = []) {
   // Never select allow_always on behalf of the user — that would
   // persistently widen Copilot's permissions beyond the single call. Only
   // allow_once is safe to auto-approve. If no allow_once option is offered
