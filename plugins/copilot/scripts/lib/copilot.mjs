@@ -247,14 +247,11 @@ async function capturePrompt(client, sessionId, startRequest, options = {}) {
   try {
     const response = await startRequest();
     options.onResponse?.(response, state);
-    // Drain any pending session/update notifications that were parsed but
-    // not yet dispatched before resolving. ACP agents finish their update
-    // stream before emitting the session/prompt response, but under
-    // coarse-chunking upstream writes a late update may still be scheduled
-    // in the microtask queue when the response resolves. Yielding once
-    // before completion gives the handler a chance to drain them so we do
-    // not truncate lastAgentMessage.
-    await new Promise((resolve) => setImmediate(resolve));
+    // Per ACP v1, the session/prompt response is the end-of-stream marker:
+    // the agent is required to finish emitting session/update notifications
+    // before returning stopReason. Our JSONL parser dispatches notifications
+    // synchronously inside handleChunk, so by the time this await resolves
+    // every update from the same chunk has already been applied to `state`.
     completePrompt(state, response?.stopReason ?? "end_turn");
     return await state.completion;
   } catch (error) {
@@ -478,13 +475,21 @@ export async function runAppServerTurn(cwd, options = {}) {
       { onProgress: options.onProgress }
     );
 
+    // Distinguish a true completion from a transport-synthesized stopReason:
+    // capturePrompt sets state.stopReason=null AND state.error=<Error> when
+    // the ACP request itself throws. Collapsing both into "completed" in
+    // turn.status would lie to any consumer that reads that field (stored
+    // job records, future UI renderers).
+    const turnStatus =
+      state.stopReason ?? (state.error ? "transport_error" : "completed");
+
     return {
       status: buildResultStatus(state),
       threadId: sessionId,
       turnId: sessionId,
       finalMessage: state.lastAgentMessage,
       reasoningSummary: state.reasoningSummary,
-      turn: { id: sessionId, status: state.stopReason ?? "completed" },
+      turn: { id: sessionId, status: turnStatus },
       error: state.error,
       stderr: cleanCopilotStderr(client.stderr),
       fileChanges: state.fileChanges,

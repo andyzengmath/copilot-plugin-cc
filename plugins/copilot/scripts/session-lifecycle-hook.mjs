@@ -94,9 +94,10 @@ async function handleSessionEnd(input) {
   const logFile = brokerSession?.logFile ?? null;
   const sessionDir = brokerSession?.sessionDir ?? null;
   const pid = brokerSession?.pid ?? null;
+  const secret = brokerSession?.secret ?? null;
 
   if (brokerEndpoint) {
-    await sendBrokerShutdown(brokerEndpoint);
+    await sendBrokerShutdown(brokerEndpoint, { secret });
   }
 
   cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);

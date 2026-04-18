@@ -46,16 +46,59 @@ export async function waitForBrokerEndpoint(endpoint, timeoutMs = 2000) {
   return false;
 }
 
-export async function sendBrokerShutdown(endpoint) {
+export async function sendBrokerShutdown(endpoint, options = {}) {
+  const secret = options.secret ?? null;
   await new Promise((resolve) => {
     const socket = connectToEndpoint(endpoint);
     socket.setEncoding("utf8");
+    let authed = false;
+    let buffer = "";
     socket.on("connect", () => {
-      socket.write(`${JSON.stringify({ id: 1, method: "broker/shutdown", params: {} })}\n`);
+      // The broker requires an initialize+secret handshake before it will
+      // accept any other method (including broker/shutdown). Send
+      // initialize first; only after it succeeds do we send shutdown.
+      const initParams = { protocolVersion: 1 };
+      if (secret) {
+        initParams._meta = { brokerSecret: secret };
+      }
+      socket.write(
+        `${JSON.stringify({ id: 1, method: "initialize", params: initParams })}\n`
+      );
     });
-    socket.on("data", () => {
-      socket.end();
-      resolve();
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        newlineIndex = buffer.indexOf("\n");
+        if (!line.trim()) continue;
+        let msg;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!authed && msg?.id === 1) {
+          if (msg.error) {
+            // Auth failed. Give up gracefully — the broker will stay up,
+            // but the caller can't do anything about it.
+            socket.end();
+            resolve();
+            return;
+          }
+          authed = true;
+          socket.write(
+            `${JSON.stringify({ id: 2, method: "broker/shutdown", params: {} })}\n`
+          );
+          continue;
+        }
+        if (authed && msg?.id === 2) {
+          socket.end();
+          resolve();
+          return;
+        }
+      }
     });
     socket.on("error", resolve);
     socket.on("close", resolve);
@@ -99,7 +142,21 @@ export function loadBrokerSession(cwd) {
 export function saveBrokerSession(cwd, session) {
   const stateDir = resolveStateDir(cwd);
   fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(resolveBrokerStateFile(cwd), `${JSON.stringify(session, null, 2)}\n`, "utf8");
+  const stateFile = resolveBrokerStateFile(cwd);
+  // broker.json contains the shared secret used to authenticate ACP broker
+  // clients. Write with mode 0600 and re-chmod explicitly so the umask
+  // cannot widen permissions on POSIX. On Windows chmod is a no-op, but the
+  // secret is still only needed by processes running as the same user —
+  // full ACL restriction would require a Windows-native helper.
+  fs.writeFileSync(stateFile, `${JSON.stringify(session, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
+  try {
+    fs.chmodSync(stateFile, 0o600);
+  } catch {
+    // Best-effort: on Windows chmod has limited effect; tolerate failure.
+  }
 }
 
 export function clearBrokerSession(cwd) {
