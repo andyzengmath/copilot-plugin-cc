@@ -27,7 +27,7 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { parseBrokerEndpoint } from "./broker-endpoint.mjs";
-import { ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
+import { BROKER_SECRET_ENV, ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
 import { terminateProcessTree } from "./process.mjs";
 
 const PLUGIN_MANIFEST_URL = new URL("../../.claude-plugin/plugin.json", import.meta.url);
@@ -70,11 +70,28 @@ function createProtocolError(message, data) {
   return error;
 }
 
-function firstAllowOption(options = []) {
-  const byKind = options.find((option) => option?.kind === "allow_once") ??
-    options.find((option) => option?.kind === "allow_always") ??
-    options.find((option) => typeof option?.optionId === "string");
-  return byKind ?? null;
+export function firstAllowOption(options = []) {
+  // Never select allow_always on behalf of the user — that would
+  // persistently widen Copilot's permissions beyond the single call. Only
+  // allow_once is safe to auto-approve. If no allow_once option is offered
+  // we fall back to any non-reject option that is also not allow_always
+  // (which means we simply don't pick one — the request will be cancelled).
+  if (!Array.isArray(options) || options.length === 0) {
+    return null;
+  }
+  const allowOnce = options.find((option) => option?.kind === "allow_once");
+  if (allowOnce) return allowOnce;
+  // Heuristic fallback: some agents omit `kind` and expect the first
+  // option to be the safe default. Pick it only if it does NOT look like a
+  // reject/allow_always variant.
+  const safeFallback = options.find(
+    (option) =>
+      typeof option?.optionId === "string" &&
+      option.kind !== "allow_always" &&
+      option.kind !== "reject_once" &&
+      option.kind !== "reject_always"
+  );
+  return safeFallback ?? null;
 }
 
 class AcpClientBase {
@@ -315,6 +332,7 @@ class BrokerCopilotAcpClient extends AcpClientBase {
     super(cwd, options);
     this.transport = "broker";
     this.endpoint = options.brokerEndpoint;
+    this.brokerSecret = options.brokerSecret ?? null;
   }
 
   async initialize() {
@@ -337,11 +355,15 @@ class BrokerCopilotAcpClient extends AcpClientBase {
       });
     });
 
-    await this.request("initialize", {
+    const initParams = {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientInfo: this.options.clientInfo ?? DEFAULT_CLIENT_INFO,
       clientCapabilities: this.options.clientCapabilities ?? DEFAULT_CLIENT_CAPABILITIES
-    });
+    };
+    if (this.brokerSecret) {
+      initParams._meta = { brokerSecret: this.brokerSecret };
+    }
+    await this.request("initialize", initParams);
   }
 
   async close() {
@@ -370,22 +392,43 @@ class BrokerCopilotAcpClient extends AcpClientBase {
 export class CopilotAcpClient {
   static async connect(cwd, options = {}) {
     let brokerEndpoint = null;
+    let brokerSecret = null;
     if (!options.disableBroker) {
       brokerEndpoint =
         options.brokerEndpoint ??
         options.env?.[BROKER_ENDPOINT_ENV] ??
         process.env[BROKER_ENDPOINT_ENV] ??
         null;
+      if (brokerEndpoint) {
+        const existingSession = loadBrokerSession(cwd);
+        if (existingSession?.endpoint === brokerEndpoint) {
+          brokerSecret = existingSession.secret ?? null;
+        }
+      }
       if (!brokerEndpoint && options.reuseExistingBroker) {
-        brokerEndpoint = loadBrokerSession(cwd)?.endpoint ?? null;
+        const existingSession = loadBrokerSession(cwd);
+        brokerEndpoint = existingSession?.endpoint ?? null;
+        brokerSecret = existingSession?.secret ?? null;
       }
       if (!brokerEndpoint && !options.reuseExistingBroker) {
         const brokerSession = await ensureBrokerSession(cwd, { env: options.env });
         brokerEndpoint = brokerSession?.endpoint ?? null;
+        brokerSecret = brokerSession?.secret ?? null;
+      }
+      // Fallback: when the endpoint came from an env var but broker.json
+      // is missing or records a different endpoint, read the secret
+      // directly from the env var the broker inherited at spawn. Without
+      // this, the auth gate rejects our initialize request and downstream
+      // operations fail at connect time.
+      if (brokerEndpoint && !brokerSecret) {
+        brokerSecret =
+          options.env?.[BROKER_SECRET_ENV] ??
+          process.env[BROKER_SECRET_ENV] ??
+          null;
       }
     }
     const client = brokerEndpoint
-      ? new BrokerCopilotAcpClient(cwd, { ...options, brokerEndpoint })
+      ? new BrokerCopilotAcpClient(cwd, { ...options, brokerEndpoint, brokerSecret })
       : new SpawnedCopilotAcpClient(cwd, options);
     await client.initialize();
     return client;

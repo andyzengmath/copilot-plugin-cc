@@ -93,7 +93,7 @@ function printUsage() {
       "  node scripts/copilot-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/copilot-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/copilot-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
-      "  node scripts/copilot-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
+      "  node scripts/copilot-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
       "  node scripts/copilot-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/copilot-companion.mjs result [job-id] [--json]",
       "  node scripts/copilot-companion.mjs cancel [job-id] [--json]"
@@ -358,10 +358,14 @@ async function executeReviewRun(request) {
 
   const context = collectReviewContext(request.cwd, target);
   const prompt = buildReviewPrompt(context, focusText, reviewName);
+  // Note: the ACP broker spawns once per Claude session with fixed
+  // --allow-all-* flags, so read-only review is enforced by prompt
+  // contract rather than runtime sandbox (Copilot CLI has no per-session
+  // sandbox knob). The review prompt templates explicitly tell the agent
+  // not to modify files.
   const result = await runAppServerTurn(context.repoRoot, {
     prompt,
     model: request.model,
-    sandbox: "read-only",
     onProgress: request.onProgress
   });
   const parsed = parseStructuredOutput(result.finalMessage, {
@@ -431,15 +435,17 @@ async function executeTaskRun(request) {
     throw new Error("Provide a prompt, a prompt file, piped stdin, or use --resume-last.");
   }
 
+  // Note: the ACP broker spawns once per Claude session, so permission
+  // scoping for the task (`--write` on or off) is enforced by prompt
+  // contract in the task-level instructions. Copilot CLI has no per-turn
+  // sandbox knob, and we intentionally avoid restarting the broker
+  // per-command to keep sessionId resume working.
   const result = await runAppServerTurn(workspaceRoot, {
     resumeThreadId,
     prompt: request.prompt,
     defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
     model: request.model,
-    effort: request.effort,
-    sandbox: request.write ? "workspace-write" : "read-only",
     onProgress: request.onProgress,
-    persistThread: true,
     threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
   });
 
@@ -702,6 +708,13 @@ async function handleTask(argv) {
   if (effortOverriddenByModel) {
     process.stderr.write(
       `[copilot] --effort ${effort} is ignored because --model ${requestedModel} was also passed.\n`
+    );
+  } else if (effort && !requestedModel && !EFFORT_TO_MODEL.has(effort)) {
+    // If an unknown effort level slipped past validation and no model
+    // fallback applies, let the user know it has no runtime effect rather
+    // than silently accepting the flag.
+    process.stderr.write(
+      `[copilot] --effort ${effort} has no mapped model; Copilot CLI will use its config default.\n`
     );
   }
   const prompt = readTaskPrompt(cwd, options, positionals);

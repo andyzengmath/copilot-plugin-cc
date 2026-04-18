@@ -218,9 +218,15 @@ function completePrompt(state, stopReason) {
   if (state.completed) return;
   state.completed = true;
   state.stopReason = stopReason;
+  const label =
+    stopReason === "end_turn"
+      ? "completed"
+      : stopReason === null
+        ? "failed (transport error)"
+        : stopReason;
   emitProgress(
     state.onProgress,
-    `Session turn ${stopReason === "end_turn" ? "completed" : stopReason}.`,
+    `Session turn ${label}.`,
     stopReason === "end_turn" ? "finalizing" : "failed"
   );
   state.resolveCompletion(state);
@@ -241,11 +247,20 @@ async function capturePrompt(client, sessionId, startRequest, options = {}) {
   try {
     const response = await startRequest();
     options.onResponse?.(response, state);
+    // Per ACP v1, the session/prompt response is the end-of-stream marker:
+    // the agent is required to finish emitting session/update notifications
+    // before returning stopReason. Our JSONL parser dispatches notifications
+    // synchronously inside handleChunk, so by the time this await resolves
+    // every update from the same chunk has already been applied to `state`.
     completePrompt(state, response?.stopReason ?? "end_turn");
     return await state.completion;
   } catch (error) {
     state.error = error;
-    completePrompt(state, "refusal");
+    // Distinguish transport errors from ACP-defined stop reasons (including
+    // "refusal", which means the model refused). Using null makes it obvious
+    // at the downstream renderer that this was an infra failure, not an LLM
+    // outcome.
+    completePrompt(state, null);
     return state;
   } finally {
     client.setNotificationHandler(previousHandler ?? null);
@@ -302,8 +317,6 @@ export function getCopilotAvailability(cwd) {
   };
 }
 
-// Legacy alias so companion.mjs ports without touching the name everywhere.
-export const getCodexAvailability = getCopilotAvailability;
 
 export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) {
   const endpoint = env?.[BROKER_ENDPOINT_ENV] ?? loadBrokerSession(cwd)?.endpoint ?? null;
@@ -390,8 +403,6 @@ export async function getCopilotAuthStatus(cwd, options = {}) {
   });
 }
 
-// Legacy alias.
-export const getCodexAuthStatus = getCopilotAuthStatus;
 
 export async function interruptAppServerTurn(cwd, { threadId, turnId }) {
   if (!threadId) {
@@ -464,13 +475,21 @@ export async function runAppServerTurn(cwd, options = {}) {
       { onProgress: options.onProgress }
     );
 
+    // Distinguish a true completion from a transport-synthesized stopReason:
+    // capturePrompt sets state.stopReason=null AND state.error=<Error> when
+    // the ACP request itself throws. Collapsing both into "completed" in
+    // turn.status would lie to any consumer that reads that field (stored
+    // job records, future UI renderers).
+    const turnStatus =
+      state.stopReason ?? (state.error ? "transport_error" : "completed");
+
     return {
       status: buildResultStatus(state),
       threadId: sessionId,
       turnId: sessionId,
       finalMessage: state.lastAgentMessage,
       reasoningSummary: state.reasoningSummary,
-      turn: { id: sessionId, status: state.stopReason ?? "completed" },
+      turn: { id: sessionId, status: turnStatus },
       error: state.error,
       stderr: cleanCopilotStderr(client.stderr),
       fileChanges: state.fileChanges,
