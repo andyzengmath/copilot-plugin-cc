@@ -218,9 +218,15 @@ function completePrompt(state, stopReason) {
   if (state.completed) return;
   state.completed = true;
   state.stopReason = stopReason;
+  const label =
+    stopReason === "end_turn"
+      ? "completed"
+      : stopReason === null
+        ? "failed (transport error)"
+        : stopReason;
   emitProgress(
     state.onProgress,
-    `Session turn ${stopReason === "end_turn" ? "completed" : stopReason}.`,
+    `Session turn ${label}.`,
     stopReason === "end_turn" ? "finalizing" : "failed"
   );
   state.resolveCompletion(state);
@@ -241,11 +247,23 @@ async function capturePrompt(client, sessionId, startRequest, options = {}) {
   try {
     const response = await startRequest();
     options.onResponse?.(response, state);
+    // Drain any pending session/update notifications that were parsed but
+    // not yet dispatched before resolving. ACP agents finish their update
+    // stream before emitting the session/prompt response, but under
+    // coarse-chunking upstream writes a late update may still be scheduled
+    // in the microtask queue when the response resolves. Yielding once
+    // before completion gives the handler a chance to drain them so we do
+    // not truncate lastAgentMessage.
+    await new Promise((resolve) => setImmediate(resolve));
     completePrompt(state, response?.stopReason ?? "end_turn");
     return await state.completion;
   } catch (error) {
     state.error = error;
-    completePrompt(state, "refusal");
+    // Distinguish transport errors from ACP-defined stop reasons (including
+    // "refusal", which means the model refused). Using null makes it obvious
+    // at the downstream renderer that this was an infra failure, not an LLM
+    // outcome.
+    completePrompt(state, null);
     return state;
   } finally {
     client.setNotificationHandler(previousHandler ?? null);

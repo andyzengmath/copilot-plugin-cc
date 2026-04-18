@@ -358,10 +358,14 @@ async function executeReviewRun(request) {
 
   const context = collectReviewContext(request.cwd, target);
   const prompt = buildReviewPrompt(context, focusText, reviewName);
+  // Note: the ACP broker spawns once per Claude session with fixed
+  // --allow-all-* flags, so read-only review is enforced by prompt
+  // contract rather than runtime sandbox (Copilot CLI has no per-session
+  // sandbox knob). The review prompt templates explicitly tell the agent
+  // not to modify files.
   const result = await runAppServerTurn(context.repoRoot, {
     prompt,
     model: request.model,
-    sandbox: "read-only",
     onProgress: request.onProgress
   });
   const parsed = parseStructuredOutput(result.finalMessage, {
@@ -431,15 +435,17 @@ async function executeTaskRun(request) {
     throw new Error("Provide a prompt, a prompt file, piped stdin, or use --resume-last.");
   }
 
+  // Note: the ACP broker spawns once per Claude session, so permission
+  // scoping for the task (`--write` on or off) is enforced by prompt
+  // contract in the task-level instructions. Copilot CLI has no per-turn
+  // sandbox knob, and we intentionally avoid restarting the broker
+  // per-command to keep sessionId resume working.
   const result = await runAppServerTurn(workspaceRoot, {
     resumeThreadId,
     prompt: request.prompt,
     defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
     model: request.model,
-    effort: request.effort,
-    sandbox: request.write ? "workspace-write" : "read-only",
     onProgress: request.onProgress,
-    persistThread: true,
     threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
   });
 

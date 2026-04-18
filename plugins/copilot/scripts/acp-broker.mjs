@@ -99,7 +99,20 @@ async function main() {
   }
 
   function routeNotification(message) {
-    const target = activeRequestSocket ?? activeStreamSocket;
+    // session/update notifications carry a sessionId; if it matches the
+    // active stream's session set, prefer the stream owner so in-flight
+    // notifications don't get diverted to a concurrent request slot (e.g.,
+    // a cancel coming in from another socket).
+    const notificationSessionId =
+      message?.method === "session/update" ? message.params?.sessionId ?? null : null;
+    const streamOwnsSession =
+      activeStreamSocket &&
+      notificationSessionId &&
+      activeStreamSessionIds &&
+      activeStreamSessionIds.has(notificationSessionId);
+    const target = streamOwnsSession
+      ? activeStreamSocket
+      : activeRequestSocket ?? activeStreamSocket;
     if (!target) {
       return;
     }
