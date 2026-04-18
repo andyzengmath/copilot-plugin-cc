@@ -19,6 +19,9 @@ import process from "node:process";
 import { parseArgs } from "./lib/args.mjs";
 import { ACP_PROTOCOL_VERSION, BROKER_BUSY_RPC_CODE, CopilotAcpClient } from "./lib/acp-client.mjs";
 import { parseBrokerEndpoint } from "./lib/broker-endpoint.mjs";
+import { BROKER_SECRET_ENV } from "./lib/broker-lifecycle.mjs";
+
+const BROKER_AUTH_RPC_CODE = -32002;
 
 const STREAMING_METHODS = new Set(["session/prompt"]);
 const BROKER_INITIALIZE_RESULT = {
@@ -80,6 +83,7 @@ async function main() {
   const endpoint = String(options.endpoint);
   const listenTarget = parseBrokerEndpoint(endpoint);
   const pidFile = options["pid-file"] ? path.resolve(options["pid-file"]) : null;
+  const expectedSecret = process.env[BROKER_SECRET_ENV] ?? null;
   writePidFile(pidFile);
 
   const acpClient = await CopilotAcpClient.connect(cwd, { disableBroker: true });
@@ -139,6 +143,12 @@ async function main() {
     sockets.add(socket);
     socket.setEncoding("utf8");
     let buffer = "";
+    // Each connection is unauthenticated until its initialize message
+    // passes broker-secret validation. We gate every other method on this
+    // flag to prevent a same-user process from driving the shared broker
+    // without knowing the secret written to broker.json (which lives in
+    // a 0700 tmpdir on POSIX and under $CLAUDE_PLUGIN_DATA on Windows).
+    let authenticated = expectedSecret === null;
 
     socket.on("data", async (chunk) => {
       buffer += chunk;
@@ -166,11 +176,35 @@ async function main() {
         // Broker-local initialize: respond with canned ACP capabilities so
         // connecting clients can complete their handshake without forwarding
         // a second `initialize` to the already-initialized upstream process.
+        // If a broker secret is configured, the client MUST include it in
+        // params._meta.brokerSecret to pass auth.
         if (message.id !== undefined && message.method === "initialize") {
+          const providedSecret = message.params?._meta?.brokerSecret ?? null;
+          if (expectedSecret !== null && providedSecret !== expectedSecret) {
+            send(socket, {
+              id: message.id,
+              error: buildJsonRpcError(BROKER_AUTH_RPC_CODE, "Broker authentication failed")
+            });
+            socket.end();
+            continue;
+          }
+          authenticated = true;
           send(socket, {
             id: message.id,
             result: BROKER_INITIALIZE_RESULT
           });
+          continue;
+        }
+
+        // Reject any non-initialize request before auth succeeds.
+        if (!authenticated) {
+          if (message.id !== undefined) {
+            send(socket, {
+              id: message.id,
+              error: buildJsonRpcError(BROKER_AUTH_RPC_CODE, "Broker authentication required")
+            });
+          }
+          socket.end();
           continue;
         }
 

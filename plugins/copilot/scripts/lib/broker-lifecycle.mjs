@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -10,7 +11,12 @@ import { resolveStateDir } from "./state.mjs";
 
 export const PID_FILE_ENV = "COPILOT_COMPANION_ACP_PID_FILE";
 export const LOG_FILE_ENV = "COPILOT_COMPANION_ACP_LOG_FILE";
+export const BROKER_SECRET_ENV = "COPILOT_COMPANION_ACP_SECRET";
 const BROKER_STATE_FILE = "broker.json";
+
+function generateBrokerSecret() {
+  return crypto.randomBytes(32).toString("hex");
+}
 
 export function createBrokerSessionDir(prefix = "cpc-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -56,11 +62,15 @@ export async function sendBrokerShutdown(endpoint) {
   });
 }
 
-export function spawnBrokerProcess({ scriptPath, cwd, endpoint, pidFile, logFile, env = process.env }) {
+export function spawnBrokerProcess({ scriptPath, cwd, endpoint, pidFile, logFile, secret, env = process.env }) {
   const logFd = fs.openSync(logFile, "a");
+  const childEnv = {
+    ...env,
+    ...(secret ? { [BROKER_SECRET_ENV]: secret } : {})
+  };
   const child = spawn(process.execPath, [scriptPath, "serve", "--endpoint", endpoint, "--cwd", cwd, "--pid-file", pidFile], {
     cwd,
-    env,
+    env: childEnv,
     detached: true,
     stdio: ["ignore", logFd, logFd]
   });
@@ -133,6 +143,7 @@ export async function ensureBrokerSession(cwd, options = {}) {
   const endpoint = endpointFactory(sessionDir, options.platform);
   const pidFile = path.join(sessionDir, "broker.pid");
   const logFile = path.join(sessionDir, "broker.log");
+  const secret = options.secret ?? generateBrokerSecret();
   const scriptPath =
     options.scriptPath ??
     fileURLToPath(new URL("../acp-broker.mjs", import.meta.url));
@@ -143,6 +154,7 @@ export async function ensureBrokerSession(cwd, options = {}) {
     endpoint,
     pidFile,
     logFile,
+    secret,
     env: options.env ?? process.env
   });
 
@@ -164,7 +176,8 @@ export async function ensureBrokerSession(cwd, options = {}) {
     pidFile,
     logFile,
     sessionDir,
-    pid: child.pid ?? null
+    pid: child.pid ?? null,
+    secret
   };
   saveBrokerSession(cwd, session);
   return session;
