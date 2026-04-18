@@ -11,6 +11,7 @@
  * an active stream).
  */
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -22,6 +23,18 @@ import { parseBrokerEndpoint } from "./lib/broker-endpoint.mjs";
 import { BROKER_SECRET_ENV } from "./lib/broker-lifecycle.mjs";
 
 const BROKER_AUTH_RPC_CODE = -32002;
+
+function secretsEqual(provided, expected) {
+  if (typeof provided !== "string" || typeof expected !== "string") return false;
+  const a = Buffer.from(provided, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) {
+    // Still burn a compare to keep timing uniform across length mismatches.
+    crypto.timingSafeEqual(b, b);
+    return false;
+  }
+  return crypto.timingSafeEqual(a, b);
+}
 
 const STREAMING_METHODS = new Set(["session/prompt"]);
 const BROKER_INITIALIZE_RESULT = {
@@ -47,7 +60,7 @@ function buildJsonRpcError(code, message, data) {
 }
 
 function send(socket, message) {
-  if (socket.destroyed) {
+  if (socket.destroyed || socket.writableEnded) {
     return;
   }
   socket.write(`${JSON.stringify(message)}\n`);
@@ -146,21 +159,139 @@ async function main() {
     // Each connection is unauthenticated until its initialize message
     // passes broker-secret validation. We gate every other method on this
     // flag to prevent a same-user process from driving the shared broker
-    // without knowing the secret written to broker.json (which lives in
-    // a 0700 tmpdir on POSIX and under $CLAUDE_PLUGIN_DATA on Windows).
+    // without knowing the secret written to broker.json (0600) or the
+    // COPILOT_COMPANION_ACP_SECRET env var inherited by the broker.
     let authenticated = expectedSecret === null;
+    // Per-socket serial queue. Node emits `data` events without waiting for
+    // async handlers to settle, so concurrent invocations would race on the
+    // shared `buffer`/`authenticated` state. Chaining work through a Promise
+    // ensures at most one drain runs per socket at a time.
+    let drainChain = Promise.resolve();
 
-    socket.on("data", async (chunk) => {
-      buffer += chunk;
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex !== -1) {
+    async function processMessage(message) {
+      // Broker-local initialize: respond with canned ACP capabilities so
+      // connecting clients can complete their handshake without forwarding
+      // a second `initialize` to the already-initialized upstream process.
+      // If a broker secret is configured, the client MUST include it in
+      // params._meta.brokerSecret to pass auth.
+      if (message.id !== undefined && message.method === "initialize") {
+        const providedSecret = message.params?._meta?.brokerSecret ?? null;
+        if (expectedSecret !== null && !secretsEqual(providedSecret ?? "", expectedSecret)) {
+          send(socket, {
+            id: message.id,
+            error: buildJsonRpcError(BROKER_AUTH_RPC_CODE, "Broker authentication failed")
+          });
+          socket.end();
+          return "close";
+        }
+        authenticated = true;
+        send(socket, {
+          id: message.id,
+          result: BROKER_INITIALIZE_RESULT
+        });
+        return "continue";
+      }
+
+      // Reject any non-initialize request before auth succeeds.
+      if (!authenticated) {
+        if (message.id !== undefined) {
+          send(socket, {
+            id: message.id,
+            error: buildJsonRpcError(BROKER_AUTH_RPC_CODE, "Broker authentication required")
+          });
+        }
+        socket.end();
+        return "close";
+      }
+
+      if (message.id !== undefined && message.method === "broker/shutdown") {
+        send(socket, { id: message.id, result: {} });
+        await shutdown(server);
+        process.exit(0);
+      }
+
+      if (message.id === undefined) {
+        return "continue";
+      }
+
+      const allowCancelDuringActiveStream =
+        isCancelRequest(message) &&
+        activeStreamSocket &&
+        activeStreamSocket !== socket &&
+        !activeRequestSocket;
+
+      if (
+        ((activeRequestSocket && activeRequestSocket !== socket) ||
+          (activeStreamSocket && activeStreamSocket !== socket)) &&
+        !allowCancelDuringActiveStream
+      ) {
+        send(socket, {
+          id: message.id,
+          error: buildJsonRpcError(BROKER_BUSY_RPC_CODE, "Shared Copilot broker is busy.")
+        });
+        return "continue";
+      }
+
+      if (allowCancelDuringActiveStream) {
+        try {
+          const result = await acpClient.request(message.method, message.params ?? {});
+          send(socket, { id: message.id, result });
+        } catch (error) {
+          send(socket, {
+            id: message.id,
+            error: buildJsonRpcError(error.rpcCode ?? -32000, error.message)
+          });
+        }
+        return "continue";
+      }
+
+      const isStreaming = STREAMING_METHODS.has(message.method);
+      activeRequestSocket = socket;
+      if (isStreaming) {
+        activeStreamSocket = socket;
+        activeStreamSessionIds = buildStreamSessionIds(
+          message.method,
+          message.params ?? {},
+          null
+        );
+      }
+
+      try {
+        const result = await acpClient.request(message.method, message.params ?? {});
+        send(socket, { id: message.id, result });
+        if (isStreaming && activeStreamSocket === socket) {
+          activeStreamSocket = null;
+          activeStreamSessionIds = null;
+        }
+        if (activeRequestSocket === socket) {
+          activeRequestSocket = null;
+        }
+      } catch (error) {
+        send(socket, {
+          id: message.id,
+          error: buildJsonRpcError(error.rpcCode ?? -32000, error.message)
+        });
+        if (activeRequestSocket === socket) {
+          activeRequestSocket = null;
+        }
+        if (activeStreamSocket === socket) {
+          activeStreamSocket = null;
+          activeStreamSessionIds = null;
+        }
+      }
+      return "continue";
+    }
+
+    async function drain() {
+      while (true) {
+        if (socket.destroyed || socket.writableEnded) {
+          return;
+        }
+        const newlineIndex = buffer.indexOf("\n");
+        if (newlineIndex === -1) return;
         const line = buffer.slice(0, newlineIndex);
         buffer = buffer.slice(newlineIndex + 1);
-        newlineIndex = buffer.indexOf("\n");
-
-        if (!line.trim()) {
-          continue;
-        }
+        if (!line.trim()) continue;
 
         let message;
         try {
@@ -173,119 +304,14 @@ async function main() {
           continue;
         }
 
-        // Broker-local initialize: respond with canned ACP capabilities so
-        // connecting clients can complete their handshake without forwarding
-        // a second `initialize` to the already-initialized upstream process.
-        // If a broker secret is configured, the client MUST include it in
-        // params._meta.brokerSecret to pass auth.
-        if (message.id !== undefined && message.method === "initialize") {
-          const providedSecret = message.params?._meta?.brokerSecret ?? null;
-          if (expectedSecret !== null && providedSecret !== expectedSecret) {
-            send(socket, {
-              id: message.id,
-              error: buildJsonRpcError(BROKER_AUTH_RPC_CODE, "Broker authentication failed")
-            });
-            socket.end();
-            continue;
-          }
-          authenticated = true;
-          send(socket, {
-            id: message.id,
-            result: BROKER_INITIALIZE_RESULT
-          });
-          continue;
-        }
-
-        // Reject any non-initialize request before auth succeeds.
-        if (!authenticated) {
-          if (message.id !== undefined) {
-            send(socket, {
-              id: message.id,
-              error: buildJsonRpcError(BROKER_AUTH_RPC_CODE, "Broker authentication required")
-            });
-          }
-          socket.end();
-          continue;
-        }
-
-        if (message.id !== undefined && message.method === "broker/shutdown") {
-          send(socket, { id: message.id, result: {} });
-          await shutdown(server);
-          process.exit(0);
-        }
-
-        if (message.id === undefined) {
-          continue;
-        }
-
-        const allowCancelDuringActiveStream =
-          isCancelRequest(message) &&
-          activeStreamSocket &&
-          activeStreamSocket !== socket &&
-          !activeRequestSocket;
-
-        if (
-          ((activeRequestSocket && activeRequestSocket !== socket) ||
-            (activeStreamSocket && activeStreamSocket !== socket)) &&
-          !allowCancelDuringActiveStream
-        ) {
-          send(socket, {
-            id: message.id,
-            error: buildJsonRpcError(BROKER_BUSY_RPC_CODE, "Shared Copilot broker is busy.")
-          });
-          continue;
-        }
-
-        if (allowCancelDuringActiveStream) {
-          try {
-            const result = await acpClient.request(message.method, message.params ?? {});
-            send(socket, { id: message.id, result });
-          } catch (error) {
-            send(socket, {
-              id: message.id,
-              error: buildJsonRpcError(error.rpcCode ?? -32000, error.message)
-            });
-          }
-          continue;
-        }
-
-        const isStreaming = STREAMING_METHODS.has(message.method);
-        activeRequestSocket = socket;
-        if (isStreaming) {
-          activeStreamSocket = socket;
-          activeStreamSessionIds = buildStreamSessionIds(
-            message.method,
-            message.params ?? {},
-            null
-          );
-        }
-
-        try {
-          const result = await acpClient.request(message.method, message.params ?? {});
-          send(socket, { id: message.id, result });
-          // For ACP, session/prompt response is the end-of-stream marker
-          // (stopReason is included). Clear ownership now.
-          if (isStreaming && activeStreamSocket === socket) {
-            activeStreamSocket = null;
-            activeStreamSessionIds = null;
-          }
-          if (activeRequestSocket === socket) {
-            activeRequestSocket = null;
-          }
-        } catch (error) {
-          send(socket, {
-            id: message.id,
-            error: buildJsonRpcError(error.rpcCode ?? -32000, error.message)
-          });
-          if (activeRequestSocket === socket) {
-            activeRequestSocket = null;
-          }
-          if (activeStreamSocket === socket) {
-            activeStreamSocket = null;
-            activeStreamSessionIds = null;
-          }
-        }
+        const action = await processMessage(message);
+        if (action === "close") return;
       }
+    }
+
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      drainChain = drainChain.then(drain).catch(() => {});
     });
 
     socket.on("close", () => {

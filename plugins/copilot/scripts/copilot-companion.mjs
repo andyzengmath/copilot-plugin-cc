@@ -709,6 +709,13 @@ async function handleTask(argv) {
     process.stderr.write(
       `[copilot] --effort ${effort} is ignored because --model ${requestedModel} was also passed.\n`
     );
+  } else if (effort && !requestedModel && !EFFORT_TO_MODEL.has(effort)) {
+    // If an unknown effort level slipped past validation and no model
+    // fallback applies, let the user know it has no runtime effect rather
+    // than silently accepting the flag.
+    process.stderr.write(
+      `[copilot] --effort ${effort} has no mapped model; Copilot CLI will use its config default.\n`
+    );
   }
   const prompt = readTaskPrompt(cwd, options, positionals);
 

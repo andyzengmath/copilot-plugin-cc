@@ -53,6 +53,17 @@ export async function sendBrokerShutdown(endpoint, options = {}) {
     socket.setEncoding("utf8");
     let authed = false;
     let buffer = "";
+    // Single-settlement guard. The explicit `resolve()` in the data handler
+    // and the socket `close`/`error` listeners can all fire — a plain
+    // double-call is idempotent, but using a flag keeps the shutdown
+    // lifecycle explicit and prevents future diffs from accidentally
+    // resolving with different values.
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
     socket.on("connect", () => {
       // The broker requires an initialize+secret handshake before it will
       // accept any other method (including broker/shutdown). Send
@@ -84,7 +95,7 @@ export async function sendBrokerShutdown(endpoint, options = {}) {
             // Auth failed. Give up gracefully — the broker will stay up,
             // but the caller can't do anything about it.
             socket.end();
-            resolve();
+            settle();
             return;
           }
           authed = true;
@@ -95,13 +106,13 @@ export async function sendBrokerShutdown(endpoint, options = {}) {
         }
         if (authed && msg?.id === 2) {
           socket.end();
-          resolve();
+          settle();
           return;
         }
       }
     });
-    socket.on("error", resolve);
-    socket.on("close", resolve);
+    socket.on("error", settle);
+    socket.on("close", settle);
   });
 }
 

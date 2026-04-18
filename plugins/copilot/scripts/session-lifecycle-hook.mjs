@@ -6,6 +6,7 @@ import process from "node:process";
 import { terminateProcessTree } from "./lib/process.mjs";
 import { BROKER_ENDPOINT_ENV } from "./lib/acp-client.mjs";
 import {
+  BROKER_SECRET_ENV,
   clearBrokerSession,
   LOG_FILE_ENV,
   loadBrokerSession,
@@ -86,7 +87,10 @@ async function handleSessionEnd(input) {
       ? {
           endpoint: process.env[BROKER_ENDPOINT_ENV],
           pidFile: process.env[PID_FILE_ENV] ?? null,
-          logFile: process.env[LOG_FILE_ENV] ?? null
+          logFile: process.env[LOG_FILE_ENV] ?? null,
+          // Include the secret so sendBrokerShutdown can authenticate
+          // against the broker's auth gate in the fallback path.
+          secret: process.env[BROKER_SECRET_ENV] ?? null
         }
       : null);
   const brokerEndpoint = brokerSession?.endpoint ?? null;

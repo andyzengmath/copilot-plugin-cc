@@ -27,7 +27,7 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { parseBrokerEndpoint } from "./broker-endpoint.mjs";
-import { ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
+import { BROKER_SECRET_ENV, ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
 import { terminateProcessTree } from "./process.mjs";
 
 const PLUGIN_MANIFEST_URL = new URL("../../.claude-plugin/plugin.json", import.meta.url);
@@ -414,6 +414,17 @@ export class CopilotAcpClient {
         const brokerSession = await ensureBrokerSession(cwd, { env: options.env });
         brokerEndpoint = brokerSession?.endpoint ?? null;
         brokerSecret = brokerSession?.secret ?? null;
+      }
+      // Fallback: when the endpoint came from an env var but broker.json
+      // is missing or records a different endpoint, read the secret
+      // directly from the env var the broker inherited at spawn. Without
+      // this, the auth gate rejects our initialize request and downstream
+      // operations fail at connect time.
+      if (brokerEndpoint && !brokerSecret) {
+        brokerSecret =
+          options.env?.[BROKER_SECRET_ENV] ??
+          process.env[BROKER_SECRET_ENV] ??
+          null;
       }
     }
     const client = brokerEndpoint
