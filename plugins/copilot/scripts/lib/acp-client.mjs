@@ -57,6 +57,27 @@ const DEFAULT_COPILOT_SPAWN_ARGS = [
   "--allow-all-urls"
 ];
 
+// Tests can override the Copilot binary + pre-args by setting this env var
+// to a JSON array, e.g. `["node","tests/fake-copilot.mjs"]`. In production
+// the default is `["copilot"]`. The resolved command's last element is
+// treated as the first positional arg if present; --acp and other flags
+// are always appended by the client.
+export const COPILOT_COMMAND_ENV = "COPILOT_COMPANION_COPILOT_COMMAND";
+
+export function resolveCopilotCommand(env = process.env) {
+  const raw = env[COPILOT_COMMAND_ENV];
+  if (!raw) return ["copilot"];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((x) => typeof x === "string")) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to default.
+  }
+  return ["copilot"];
+}
+
 function buildJsonRpcError(code, message, data) {
   return data === undefined ? { code, message } : { code, message, data };
 }
@@ -242,15 +263,30 @@ class SpawnedCopilotAcpClient extends AcpClientBase {
   }
 
   async initialize() {
-    const args = this.options.model
+    const spawnArgs = this.options.model
       ? [...DEFAULT_COPILOT_SPAWN_ARGS, "--model", String(this.options.model)]
       : [...DEFAULT_COPILOT_SPAWN_ARGS];
 
-    this.proc = spawn("copilot", args, {
+    const env = this.options.env ?? process.env;
+    const [bin, ...preArgs] = resolveCopilotCommand(env);
+    const args = [...preArgs, ...spawnArgs];
+
+    // When a custom COPILOT_COMMAND override is in play (tests), skip the
+    // shell wrapper — we're spawning a known Node script directly and
+    // cmd.exe /c semantics only add failure modes. The shell wrapper is
+    // needed in production on Windows because the real copilot CLI can
+    // ship as a `.cmd` launcher.
+    const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
+    const shell =
+      useCustomCommand || process.platform !== "win32"
+        ? false
+        : env.SHELL || true;
+
+    this.proc = spawn(bin, args, {
       cwd: this.cwd,
-      env: this.options.env ?? process.env,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
+      shell,
       windowsHide: true
     });
 
