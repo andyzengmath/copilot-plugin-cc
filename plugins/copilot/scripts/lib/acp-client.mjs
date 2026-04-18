@@ -280,7 +280,7 @@ class SpawnedCopilotAcpClient extends AcpClientBase {
     const shell =
       useCustomCommand || process.platform !== "win32"
         ? false
-        : process.env.SHELL || true;
+        : env.SHELL || true;
 
     this.proc = spawn(bin, args, {
       cwd: this.cwd,

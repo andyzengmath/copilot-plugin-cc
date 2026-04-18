@@ -3,7 +3,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { CopilotAcpClient, COPILOT_COMMAND_ENV } from "../plugins/copilot/scripts/lib/acp-client.mjs";
+import {
+  CopilotAcpClient,
+  COPILOT_COMMAND_ENV,
+  resolveCopilotCommand
+} from "../plugins/copilot/scripts/lib/acp-client.mjs";
 
 const FAKE_COPILOT = fileURLToPath(new URL("./fake-copilot.mjs", import.meta.url));
 
@@ -120,6 +124,59 @@ test("session/cancel is accepted by default", async () => {
   } finally {
     await client.close();
   }
+});
+
+test("session/cancel is rejected when cancelAcknowledges is false", async () => {
+  const env = envFor({ sessionId: "sess-cancel-rej-1", cancelAcknowledges: false });
+  const client = await CopilotAcpClient.connect(process.cwd(), { env, disableBroker: true });
+  try {
+    await client.request("session/new", { cwd: process.cwd(), mcpServers: [] });
+    await assert.rejects(
+      () => client.request("session/cancel", { sessionId: "sess-cancel-rej-1" }),
+      (err) => /cancel rejected/.test(String(err?.message ?? err))
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+test("resolveCopilotCommand returns default when env var is unset", () => {
+  assert.deepEqual(resolveCopilotCommand({}), ["copilot"]);
+});
+
+test("resolveCopilotCommand returns default for non-JSON input", () => {
+  assert.deepEqual(
+    resolveCopilotCommand({ [COPILOT_COMMAND_ENV]: "not json" }),
+    ["copilot"]
+  );
+});
+
+test("resolveCopilotCommand returns default for non-array JSON", () => {
+  assert.deepEqual(
+    resolveCopilotCommand({ [COPILOT_COMMAND_ENV]: '"stringval"' }),
+    ["copilot"]
+  );
+});
+
+test("resolveCopilotCommand returns default for empty array", () => {
+  assert.deepEqual(
+    resolveCopilotCommand({ [COPILOT_COMMAND_ENV]: "[]" }),
+    ["copilot"]
+  );
+});
+
+test("resolveCopilotCommand returns default when array contains a non-string", () => {
+  assert.deepEqual(
+    resolveCopilotCommand({ [COPILOT_COMMAND_ENV]: '["node", 42]' }),
+    ["copilot"]
+  );
+});
+
+test("resolveCopilotCommand returns parsed array for valid input", () => {
+  assert.deepEqual(
+    resolveCopilotCommand({ [COPILOT_COMMAND_ENV]: '["node","fake.mjs"]' }),
+    ["node", "fake.mjs"]
+  );
 });
 
 test("session/prompt can drive a server-initiated session/request_permission turnaround", async () => {
