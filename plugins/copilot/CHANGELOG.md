@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.2.0
+Note: the first two releases were originally cut as 0.1.0 and 0.2.0 but
+retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
+pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
+still say 0.1.0; the tag itself is the canonical identifier.
+
+## 0.0.2
 
 End-to-end test coverage against a spawnable fake-ACP fixture + small
 correctness and ergonomics fixes surfaced by the review cycle.
@@ -38,6 +43,6 @@ Removed:
 
 See the full review-cycle history on the merged PRs #2–#7.
 
-## 0.1.0
+## 0.0.1
 
 - Initial release. Ports the codex-plugin-cc architecture to GitHub Copilot CLI via ACP v1.
