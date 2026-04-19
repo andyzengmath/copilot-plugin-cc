@@ -184,6 +184,12 @@ the per-command porting decisions.
   of a `spawnSync` quoting issue inherited from codex-plugin-cc. Move the
   repo to a path without spaces to work around it.
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for the threat model, the Windows ACL
+caveat on `broker.json`, the per-call CLI shell-metacharacter allow-list,
+and how to report vulnerabilities via a private GitHub Security Advisory.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
