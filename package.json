@@ -1,6 +1,6 @@
 {
   "name": "@github/copilot-plugin-cc",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "type": "module",
   "description": "Use GitHub Copilot CLI from Claude Code to review code or delegate tasks.",
