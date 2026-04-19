@@ -32,11 +32,28 @@
  * plugin always appends it). Other flags (`--allow-all-*`, `--model`)
  * are captured into the `SpawnArgs` buffer for tests that want to assert
  * how the plugin invoked us.
+ *
+ * When invoked with `--version` or `-v` as the first argument, the
+ * fixture prints a banner to stdout and exits 0 without entering ACP
+ * mode. This mirrors the real Copilot CLI's `--version` behavior and
+ * is what makes `getCopilotAvailability` see the fake as "available"
+ * when tests point it at this script via
+ * `COPILOT_COMPANION_COPILOT_COMMAND`.
  */
 
 import fs from "node:fs";
 import readline from "node:readline";
 import process from "node:process";
+
+// Respond to plain `--version` / `-v` probes without entering ACP mode so
+// that `getCopilotAvailability` (which spawns `<bin> --version`) gets a
+// clean success when the plugin is pointed at this fake via
+// COPILOT_COMPANION_COPILOT_COMMAND.
+const cliArgs = process.argv.slice(2);
+if (cliArgs[0] === "--version" || cliArgs[0] === "-v") {
+  process.stdout.write("fake-copilot 0.0.0\n");
+  process.exit(0);
+}
 
 function readScript() {
   const inline = process.env.FAKE_COPILOT_SCRIPT;

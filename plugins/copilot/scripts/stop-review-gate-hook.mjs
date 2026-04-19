@@ -56,8 +56,8 @@ function buildStopReviewPrompt(input = {}) {
   });
 }
 
-function buildSetupNote(cwd) {
-  const availability = getCopilotAvailability(cwd);
+function buildSetupNote(cwd, env = process.env) {
+  const availability = getCopilotAvailability(cwd, { env });
   if (availability.available) {
     return null;
   }
@@ -156,7 +156,7 @@ function main() {
     return;
   }
 
-  const setupNote = buildSetupNote(cwd);
+  const setupNote = buildSetupNote(cwd, process.env);
   if (setupNote) {
     logNote(setupNote);
     logNote(runningTaskNote);
