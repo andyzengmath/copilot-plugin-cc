@@ -38,6 +38,16 @@ import fs from "node:fs";
 import readline from "node:readline";
 import process from "node:process";
 
+// Respond to plain `--version` / `-v` probes without entering ACP mode so
+// that `getCopilotAvailability` (which spawns `<bin> --version`) gets a
+// clean success when the plugin is pointed at this fake via
+// COPILOT_COMPANION_COPILOT_COMMAND.
+const cliArgs = process.argv.slice(2);
+if (cliArgs[0] === "--version" || cliArgs[0] === "-v") {
+  process.stdout.write("fake-copilot 0.0.0\n");
+  process.exit(0);
+}
+
 function readScript() {
   const inline = process.env.FAKE_COPILOT_SCRIPT;
   if (inline) {

@@ -17,7 +17,9 @@ import {
   ACP_PROTOCOL_VERSION,
   BROKER_BUSY_RPC_CODE,
   BROKER_ENDPOINT_ENV,
-  CopilotAcpClient
+  COPILOT_COMMAND_ENV,
+  CopilotAcpClient,
+  resolveCopilotCommand
 } from "./acp-client.mjs";
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
@@ -308,8 +310,22 @@ function buildResultStatus(state) {
 // Public API
 // ---------------------------------------------------------------------------
 
-export function getCopilotAvailability(cwd) {
-  const versionStatus = binaryAvailable("copilot", ["--version"], { cwd });
+export function getCopilotAvailability(cwd, options = {}) {
+  // Honor the test-only COPILOT_COMPANION_COPILOT_COMMAND override so hook
+  // tests can point the availability probe at the same fake binary as the
+  // ACP client. In production the env var is unset and this resolves to
+  // plain `["copilot"]`.
+  const env = options.env ?? process.env;
+  const [bin, ...preArgs] = resolveCopilotCommand(env);
+  // When a custom command is in play, disable the Windows shell wrapper so
+  // cmd.exe's arg-splitting does not mangle absolute paths containing
+  // spaces (e.g., test workspaces under %USERPROFILE%\OneDrive - *).
+  const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
+  const versionStatus = binaryAvailable(bin, [...preArgs, "--version"], {
+    cwd,
+    env,
+    shell: useCustomCommand ? false : undefined
+  });
   if (!versionStatus.available) return versionStatus;
   return {
     available: true,

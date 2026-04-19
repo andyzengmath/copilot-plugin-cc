@@ -215,9 +215,64 @@ test("stop hook (gate enabled) emits a block decision when Copilot returns BLOCK
   assert.match(decision.reason, /missing empty-state guard/);
 });
 
-// Deferred: "stop hook when Copilot is unavailable" and "stop hook with a
-// clean ALLOW verdict". getCopilotAvailability probes `copilot` on PATH
-// directly (not via COPILOT_COMMAND_ENV), so the unavailable path is
-// environment-dependent. A clean-verdict test is a straightforward
-// follow-up (just script the first chunk as "ALLOW: ..." and assert
-// empty stdout) — deferred only to keep this PR's scope tight.
+test("stop hook (gate enabled) surfaces a setup note + skips block when Copilot is unavailable", () => {
+  const repo = makeTempDir();
+  const pluginData = makeTempDir();
+  seedState(repo, pluginData, { config: { stopReviewGate: true } });
+
+  // Point the override at a binary that does not exist. After PR #9
+  // getCopilotAvailability honors COPILOT_COMPANION_COPILOT_COMMAND, so
+  // the hook sees Copilot as unavailable and falls through to a setup
+  // note on stderr without emitting a block decision.
+  const env = {
+    ...buildCopilotEnv({ pluginData, sessionId: "sess-unavail" }),
+    COPILOT_COMPANION_COPILOT_COMMAND: JSON.stringify(["nonexistent-copilot-bin-xyz"])
+  };
+
+  const result = run(process.execPath, [STOP_HOOK], {
+    cwd: repo,
+    env,
+    input: JSON.stringify({ cwd: repo, session_id: "sess-unavail" })
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "");
+  assert.match(result.stderr, /Copilot is not set up for the review gate/i);
+});
+
+test("stop hook (gate enabled) allows the stop when Copilot returns ALLOW: on its first line", () => {
+  const repo = makeTempDir();
+  const pluginData = makeTempDir();
+  seedState(repo, pluginData, { config: { stopReviewGate: true } });
+
+  const env = buildCopilotEnv({
+    pluginData,
+    sessionId: "sess-allow",
+    script: {
+      sessionId: "sess-stop-allow",
+      prompt: {
+        updates: [
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "ALLOW: no new changes require review" }
+          }
+        ],
+        stopReason: "end_turn"
+      }
+    }
+  });
+
+  const result = run(process.execPath, [STOP_HOOK], {
+    cwd: repo,
+    env,
+    input: JSON.stringify({
+      cwd: repo,
+      session_id: "sess-allow",
+      last_assistant_message: "Finished the refactor."
+    })
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  // No block decision emitted — hook allows the stop.
+  assert.equal(result.stdout.trim(), "");
+});

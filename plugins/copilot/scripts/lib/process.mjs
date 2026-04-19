@@ -2,6 +2,12 @@ import { spawnSync } from "node:child_process";
 import process from "node:process";
 
 export function runCommand(command, args = [], options = {}) {
+  // Let callers force `shell: false` to bypass cmd.exe's arg-splitting on
+  // Windows when they're passing a path that may contain spaces. The
+  // default retains the historical Windows-shell behavior for binaries
+  // like `copilot` that ship as a `.cmd` launcher.
+  const defaultShell = process.platform === "win32" ? (process.env.SHELL || true) : false;
+  const shell = options.shell === undefined ? defaultShell : options.shell;
   const result = spawnSync(command, args, {
     cwd: options.cwd,
     env: options.env,
@@ -9,7 +15,7 @@ export function runCommand(command, args = [], options = {}) {
     input: options.input,
     maxBuffer: options.maxBuffer,
     stdio: options.stdio ?? "pipe",
-    shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
+    shell,
     windowsHide: true
   });
 
