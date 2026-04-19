@@ -77,6 +77,50 @@ function readScript() {
 
 const script = readScript();
 
+// Append one JSON line per spawn so tests can assert how the plugin invoked
+// the fake (e.g. that `--model claude-opus-4.6` was on argv, or that the
+// per-call CLI fallback went through `-p` rather than `--acp`). Only the
+// ACP-mode and -p-mode entries land here; the bare `--version` probe early-
+// exits above before we reach this line.
+const spawnLogPath = process.env.FAKE_COPILOT_SPAWN_LOG;
+if (spawnLogPath) {
+  try {
+    fs.appendFileSync(
+      spawnLogPath,
+      JSON.stringify({
+        argv: process.argv.slice(2),
+        env: {
+          COPILOT_COMPANION_SESSION_ID: process.env.COPILOT_COMPANION_SESSION_ID ?? null,
+          COPILOT_COMPANION_ACP_ENDPOINT: process.env.COPILOT_COMPANION_ACP_ENDPOINT ?? null
+        }
+      }) + "\n",
+      "utf8"
+    );
+  } catch {
+    // Best effort — don't crash the fixture if the log path is bad.
+  }
+}
+
+// `copilot -p "<prompt>" --model <model> ...` one-shot mode. Real Copilot
+// prints its final message to stdout and exits. Mirror that shape from the
+// scripted `prompt.updates` so the per-call-model fallback in copilot.mjs
+// has something to parse.
+if (cliArgs[0] === "-p") {
+  const updates = Array.isArray(script?.prompt?.updates) ? script.prompt.updates : [];
+  const text = updates
+    .map((update) =>
+      update?.sessionUpdate === "agent_message_chunk"
+        ? update?.content?.text ?? ""
+        : ""
+    )
+    .join("");
+  if (text) {
+    process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+  }
+  const stopReason = script?.prompt?.stopReason ?? "end_turn";
+  process.exit(stopReason === "end_turn" ? 0 : 1);
+}
+
 const DEFAULT_INITIALIZE = {
   protocolVersion: 1,
   agentCapabilities: {
