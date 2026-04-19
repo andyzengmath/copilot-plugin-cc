@@ -9,12 +9,12 @@
  * @typedef {import("./acp-protocol").StopReason} StopReason
  * @typedef {((update: string | { message: string, phase: string | null, threadId?: string | null, turnId?: string | null, stderrMessage?: string | null, logTitle?: string | null, logBody?: string | null }) => void)} ProgressReporter
  */
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawn } from "node:child_process";
 import { readJsonFile } from "./fs.mjs";
 import {
   ACP_PROTOCOL_VERSION,
@@ -463,6 +463,25 @@ function ensureCopilotAvailable(cwd, options = {}) {
   }
 }
 
+// Shell/cmd.exe metacharacters. Any of these in a user-controlled argv slot
+// becomes a command-injection vector on Windows where we keep `shell:true`
+// for `.cmd` launcher resolution (CVE-2024-27980 / "BatBadBut" class). We
+// fail closed across all platforms rather than diffing behaviour by shell
+// flag — callers hitting this can reword or drop `--model`/`--effort` to
+// route through the ACP broker, where prompts travel over JSON-RPC and
+// never reach a shell.
+const SHELL_METACHAR_RE = /[`$&|;<>^"\r\n\x00]|%[^%]*%/;
+
+function assertNoShellMetachars(value, label) {
+  if (typeof value !== "string" || SHELL_METACHAR_RE.test(value)) {
+    throw new Error(
+      `Refusing to spawn Copilot CLI: ${label} contains a shell metacharacter ` +
+        "(one of ` $ & | ; < > ^ \" CR LF NUL %VAR%). Reword the " +
+        `${label} or drop --model/--effort to route through the broker.`
+    );
+  }
+}
+
 /**
  * Per-call CLI fallback for `--model`. Copilot CLI exposes `--model` only at
  * spawn time, so the shared ACP broker (spawned once per Claude session with
@@ -474,6 +493,16 @@ function ensureCopilotAvailable(cwd, options = {}) {
  * status reporters stay identical; the trade-off is coarser progress (we
  * emit two phase transitions instead of streaming `session/update` events)
  * and no `copilotSessionId` (the CLI one-shot has no resumable sessionId).
+ *
+ * Note on `--allow-all-tools --allow-all-paths`: the shared broker spawns
+ * with the same flags (see `DEFAULT_COPILOT_SPAWN_ARGS` in acp-client.mjs),
+ * so the one-shot CLI does not widen the CLI-level permission set. What the
+ * broker additionally provides is auto-approval of ACP
+ * `session/request_permission` calls via `firstAllowOption` (allow_once,
+ * never allow_always); one-shot `-p` mode has no such round-trip hook, so
+ * any tool Copilot chooses to invoke during the single call runs without
+ * per-call mediation. Callers that need per-tool approval should route
+ * through the broker by omitting `--model`/`--effort`.
  */
 async function runCopilotCli(cwd, options = {}) {
   const env = options.env ?? process.env;
@@ -483,6 +512,10 @@ async function runCopilotCli(cwd, options = {}) {
   }
 
   const model = String(options.model);
+  assertNoShellMetachars(prompt, "prompt");
+  assertNoShellMetachars(model, "--model value");
+  assertNoShellMetachars(cwd, "working directory");
+
   const [bin, ...preArgs] = resolveCopilotCommand(env);
   const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
   const shell =
@@ -508,6 +541,19 @@ async function runCopilotCli(cwd, options = {}) {
   );
 
   return await new Promise((resolve) => {
+    // Node emits `error` (pre-spawn failures like ENOENT), `exit` (process
+    // ended), and `close` (process ended AND all stdio streams drained).
+    // `exit` can fire before the last stdout chunk arrives, which would
+    // silently truncate `finalMessage`. Listen on `close` for the happy
+    // path and guard against double-resolve if `error` fires after we've
+    // already settled via `close` (or vice versa).
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
     let stdoutBuf = "";
     let stderrBuf = "";
     const proc = spawn(bin, args, {
@@ -531,7 +577,7 @@ async function runCopilotCli(cwd, options = {}) {
         `Copilot CLI failed to start: ${error.message}`,
         "failed"
       );
-      resolve(
+      settle(
         buildCliResult({
           exit: 1,
           threadId,
@@ -542,7 +588,7 @@ async function runCopilotCli(cwd, options = {}) {
         })
       );
     });
-    proc.on("exit", (code, signal) => {
+    proc.on("close", (code, signal) => {
       const exit = code ?? (signal ? 1 : 0);
       emitProgress(
         options.onProgress,
@@ -551,7 +597,7 @@ async function runCopilotCli(cwd, options = {}) {
           : `Copilot CLI exited ${signal ? `(signal ${signal})` : `(code ${code})`}.`,
         exit === 0 ? "finalizing" : "failed"
       );
-      resolve(
+      settle(
         buildCliResult({
           exit,
           threadId,

