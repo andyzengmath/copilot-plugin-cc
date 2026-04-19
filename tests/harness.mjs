@@ -20,7 +20,6 @@ export const FAKE_COPILOT_PATH = path.join(TESTS_DIR, "fake-copilot.mjs");
  * @param {object|null} [opts.script]        JSON payload for FAKE_COPILOT_SCRIPT.
  * @param {string|null} [opts.sessionId]     Sets COPILOT_COMPANION_SESSION_ID.
  * @param {string|null} [opts.pluginData]    Sets CLAUDE_PLUGIN_DATA (usually a fresh makeTempDir()).
- * @param {string|null} [opts.spawnLog]      Sets FAKE_COPILOT_SPAWN_LOG (tests assert argv/env).
  * @param {object}      [opts.extraEnv]      Extra env vars to merge in last.
  */
 export function buildCopilotEnv(opts = {}) {
@@ -36,9 +35,6 @@ export function buildCopilotEnv(opts = {}) {
   }
   if (opts.pluginData) {
     env.CLAUDE_PLUGIN_DATA = opts.pluginData;
-  }
-  if (opts.spawnLog) {
-    env.FAKE_COPILOT_SPAWN_LOG = opts.spawnLog;
   }
   return { ...env, ...(opts.extraEnv ?? {}) };
 }

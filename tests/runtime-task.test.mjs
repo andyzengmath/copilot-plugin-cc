@@ -59,7 +59,7 @@ test("task rejects --resume and --fresh together", () => {
   assert.match(result.stderr, /Choose either --resume\/--resume-last or --fresh/);
 });
 
-test("task --background enqueues a tracked job and exits without waiting", () => {
+test("task --background enqueues a tracked job and persists a queued record", () => {
   const pluginData = makeTempDir();
   const result = runCompanion(
     ["task", "--background", "work on it"],
@@ -68,6 +68,21 @@ test("task --background enqueues a tracked job and exits without waiting", () =>
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   assert.match(result.stdout, /started in the background as task-/);
   assert.match(result.stdout, /Check \/copilot:status/);
+
+  const stateRoot = path.join(pluginData, "state");
+  const workspaceEntry = fs.readdirSync(stateRoot)[0];
+  const jobsDir = path.join(stateRoot, workspaceEntry, "jobs");
+  const jobFile = fs.readdirSync(jobsDir).find((name) => name.endsWith(".json"));
+  assert.ok(jobFile, `expected a job record under ${jobsDir}`);
+  const job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
+  // Parent process exits synchronously after writing the queued record; the
+  // detached worker may still be transitioning when we read. Accept either
+  // the initial "queued" state or any later terminal state.
+  assert.ok(
+    ["queued", "running", "completed", "failed"].includes(job.status),
+    `unexpected job.status=${job.status}`
+  );
+  assert.equal(job.jobClass, "task");
 });
 
 test("task with both --model and --effort emits a stderr notice that --effort was ignored", () => {
@@ -125,6 +140,57 @@ test("task persists a job record with copilotSessionId after completion", () => 
   assert.equal(job.status, "completed");
   assert.equal(job.threadId, "sess-persist-1");
   assert.equal(job.result?.copilotSessionId, "sess-persist-1");
+});
+
+test("task with stopReason=cancelled exits non-zero and records the turn status", () => {
+  const pluginData = makeTempDir();
+  const result = runCompanion(
+    ["task", "cancel me"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("partial work", {
+        sessionId: "sess-cancel-task",
+        stopReason: "cancelled"
+      })
+    }
+  );
+  assert.notEqual(result.status, 0);
+  const stateRoot = path.join(pluginData, "state");
+  const workspaceEntry = fs.readdirSync(stateRoot)[0];
+  const jobsDir = path.join(stateRoot, workspaceEntry, "jobs");
+  const jobFile = fs.readdirSync(jobsDir).find((n) => n.endsWith(".json"));
+  const job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
+  assert.equal(job.status, "failed");
+});
+
+test("task with stopReason=refusal exits non-zero", () => {
+  const pluginData = makeTempDir();
+  const result = runCompanion(
+    ["task", "refuse this"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("", {
+        sessionId: "sess-refusal-task",
+        stopReason: "refusal"
+      })
+    }
+  );
+  assert.notEqual(result.status, 0);
+});
+
+test("task with empty updates array completes cleanly", () => {
+  const pluginData = makeTempDir();
+  const result = runCompanion(
+    ["task", "silent completion"],
+    {
+      pluginData,
+      script: {
+        sessionId: "sess-silent-1",
+        prompt: { updates: [], stopReason: "end_turn" }
+      }
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
 });
 
 test("task with piped stdin prompt runs and surfaces output", () => {
