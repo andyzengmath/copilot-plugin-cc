@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { makeTempDir, run } from "./helpers.mjs";
-import { PLUGIN_ROOT } from "./harness.mjs";
+import { buildCopilotEnv, PLUGIN_ROOT } from "./harness.mjs";
 import { resolveStateDir } from "../plugins/copilot/scripts/lib/state.mjs";
 
 const SESSION_HOOK = path.join(PLUGIN_ROOT, "scripts", "session-lifecycle-hook.mjs");
@@ -65,8 +65,15 @@ test("SessionStart hook writes COPILOT_COMPANION_SESSION_ID + CLAUDE_PLUGIN_DATA
 
   assert.equal(result.status, 0, result.stderr);
   const written = fs.readFileSync(envFile, "utf8");
-  assert.match(written, /export COPILOT_COMPANION_SESSION_ID='sess-current'/);
-  assert.match(written, new RegExp(`export CLAUDE_PLUGIN_DATA='${pluginData.replace(/\\/g, "\\\\")}'`));
+  const lines = written.split(/\r?\n/).filter(Boolean);
+  assert.ok(
+    lines.includes("export COPILOT_COMPANION_SESSION_ID='sess-current'"),
+    `SESSION_ID export missing. Got:\n${written}`
+  );
+  assert.ok(
+    lines.includes(`export CLAUDE_PLUGIN_DATA='${pluginData}'`),
+    `PLUGIN_DATA export missing. Got:\n${written}`
+  );
 });
 
 test("SessionEnd hook removes jobs belonging to the ending session", () => {
@@ -144,7 +151,7 @@ test("stop hook (gate disabled) notes a running task on stderr and does not bloc
   assert.equal(result.stdout.trim(), "");
   assert.match(result.stderr, /Copilot task task-live is still running/i);
   assert.match(result.stderr, /\/copilot:status/);
-  assert.match(result.stderr, /\/copilot:cancel task-live/);
+  assert.match(result.stderr, /\/copilot:cancel task-live(?:\s|$)/);
 });
 
 test("stop hook (gate disabled) is silent when no jobs are running", () => {
@@ -164,9 +171,53 @@ test("stop hook (gate disabled) is silent when no jobs are running", () => {
   assert.doesNotMatch(result.stderr, /is still running/i);
 });
 
+test("stop hook (gate enabled) emits a block decision when Copilot returns BLOCK: on its first line", () => {
+  const repo = makeTempDir();
+  const pluginData = makeTempDir();
+  seedState(repo, pluginData, { config: { stopReviewGate: true } });
+
+  // Full ACP round-trip: the hook spawns copilot-companion task --json,
+  // which goes through the broker → fake-copilot. Scripting the first
+  // agent message chunk as "BLOCK: <reason>" causes parseStopReviewOutput
+  // to synthesize a block decision.
+  const env = {
+    ...buildCopilotEnv({
+      pluginData,
+      sessionId: "sess-block",
+      script: {
+        sessionId: "sess-stop-block",
+        prompt: {
+          updates: [
+            {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "BLOCK: missing empty-state guard" }
+            }
+          ],
+          stopReason: "end_turn"
+        }
+      }
+    })
+  };
+
+  const result = run(process.execPath, [STOP_HOOK], {
+    cwd: repo,
+    env,
+    input: JSON.stringify({
+      cwd: repo,
+      session_id: "sess-block",
+      last_assistant_message: "I rewrote the retry loop."
+    })
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const decision = JSON.parse(result.stdout.trim());
+  assert.equal(decision.decision, "block");
+  assert.match(decision.reason, /missing empty-state guard/);
+});
+
 // Deferred: "stop hook when Copilot is unavailable" and "stop hook with a
-// clean review verdict" both need either Copilot removed from PATH or a
-// live fake-copilot handshake. getCopilotAvailability probes `copilot` on
-// PATH directly (not via COPILOT_COMMAND_ENV), so the unavailable path is
-// environment-dependent; the clean-verdict path needs a full ACP round
-// trip. Both revisit in v0.3 alongside broker-scoped model plumbing.
+// clean ALLOW verdict". getCopilotAvailability probes `copilot` on PATH
+// directly (not via COPILOT_COMMAND_ENV), so the unavailable path is
+// environment-dependent. A clean-verdict test is a straightforward
+// follow-up (just script the first chunk as "ALLOW: ..." and assert
+// empty stdout) — deferred only to keep this PR's scope tight.
