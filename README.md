@@ -160,17 +160,25 @@ See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and
 the per-command porting decisions.
 
-## v0.1 status
+## v0.2 status
 
-- Core runtime, broker, companion, and hooks ported.
+- Core runtime, broker, companion, and hooks all ported and under test.
 - Standard and adversarial review commands share one prompt-engineered path
   (Copilot has no native `review/start` RPC).
 - Bundled Copilot agent definitions live in `plugins/copilot/copilot-agents/`
   for users who want to invoke the same review contracts from interactive
   Copilot: `copilot --agent copilot-code-review`.
-- Runtime and command tests that depend on a Codex-shaped fixture are
-  parked as `.pending.mjs` until a fake-ACP fixture lands; the
-  protocol-agnostic tests (git, process, render, part of state) pass.
+- Test coverage is now end-to-end against a spawnable fake-ACP fixture
+  (`tests/fake-copilot.mjs`). Suites: `runtime-task`, `runtime-review`,
+  `runtime-status-result-cancel`, `runtime-hooks`, `commands`, plus the
+  protocol-agnostic set (git, process, render, state, broker-endpoint,
+  broker-lifecycle, acp-client-allow-option, fake-copilot).
+- Deferred to v0.3: per-session `--model` plumbing through the shared
+  broker (broker is spawned once per Claude session, so per-call `--model`
+  does not reach the upstream spawn); the multi-provider setup/auth
+  tests from codex-plugin-cc (Codex-specific `account/read` + `config/read`
+  contracts need a Copilot-native rewrite); shared-broker lazy-startup
+  assertions.
 - On Windows workspaces whose path contains spaces, `bump-version` and
   similar subprocess-style tests may fail with `MODULE_NOT_FOUND` because
   of a `spawnSync` quoting issue inherited from codex-plugin-cc. Move the
