@@ -466,6 +466,7 @@ async function executeTaskRun(request) {
   const payload = {
     status: result.status,
     threadId: result.threadId,
+    copilotSessionId: result.copilotSessionId ?? result.threadId,
     rawOutput,
     touchedFiles: result.touchedFiles,
     reasoningSummary: result.reasoningSummary

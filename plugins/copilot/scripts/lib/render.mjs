@@ -100,10 +100,14 @@ function escapeMarkdownCell(value) {
 }
 
 function formatCopilotResumeCommand(job) {
-  if (!job?.threadId) {
+  const sessionId =
+    job?.result?.copilotSessionId ??
+    job?.threadId ??
+    null;
+  if (!sessionId) {
     return null;
   }
-  return `copilot --continue ${job.threadId}`;
+  return `copilot --continue ${sessionId}`;
 }
 
 function appendActiveJobsTable(lines, jobs) {
