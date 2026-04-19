@@ -24,39 +24,30 @@ function runCompanion(args, opts = {}) {
 }
 
 function seedState(workspace, pluginData, { config = {}, jobs = [], jobFiles = {} } = {}) {
-  // resolveStateDir reads CLAUDE_PLUGIN_DATA from process.env; temporarily
-  // set it so the computed path matches what the child companion process
-  // will see when we pass the same pluginData via env.
-  const previous = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = pluginData;
-  try {
-    const stateDir = resolveStateDir(workspace);
-    const jobsDir = path.join(stateDir, "jobs");
-    fs.mkdirSync(jobsDir, { recursive: true });
+  // resolveStateDir accepts an explicit pluginData override so we don't
+  // have to mutate process.env. The companion subprocess spawned later
+  // reads CLAUDE_PLUGIN_DATA from its own env and will compute the same
+  // path.
+  const stateDir = resolveStateDir(workspace, { pluginData });
+  const jobsDir = path.join(stateDir, "jobs");
+  fs.mkdirSync(jobsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(stateDir, "state.json"),
+    `${JSON.stringify(
+      { version: 1, config: { stopReviewGate: false, ...config }, jobs },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  for (const [jobId, payload] of Object.entries(jobFiles)) {
     fs.writeFileSync(
-      path.join(stateDir, "state.json"),
-      `${JSON.stringify(
-        { version: 1, config: { stopReviewGate: false, ...config }, jobs },
-        null,
-        2
-      )}\n`,
+      path.join(jobsDir, `${jobId}.json`),
+      `${JSON.stringify(payload, null, 2)}\n`,
       "utf8"
     );
-    for (const [jobId, payload] of Object.entries(jobFiles)) {
-      fs.writeFileSync(
-        path.join(jobsDir, `${jobId}.json`),
-        `${JSON.stringify(payload, null, 2)}\n`,
-        "utf8"
-      );
-    }
-    return { stateDir, jobsDir };
-  } finally {
-    if (previous == null) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
-    } else {
-      process.env.CLAUDE_PLUGIN_DATA = previous;
-    }
   }
+  return { stateDir, jobsDir };
 }
 
 test("status shows 'no jobs tracked' when the state is empty", () => {
@@ -67,7 +58,7 @@ test("status shows 'no jobs tracked' when the state is empty", () => {
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   // Rendered status for zero jobs uses "No jobs tracked" or similar;
   // accept any phrase that makes it clear there's nothing to show.
-  assert.match(result.stdout, /No (active|jobs)|No Copilot jobs|no jobs/i);
+  assert.match(result.stdout, /No jobs recorded yet\./);
 });
 
 test("status renders a completed review as the latest finished job", () => {
@@ -109,6 +100,11 @@ test("status renders a completed review as the latest finished job", () => {
   assert.match(result.stdout, /Latest finished/);
   assert.match(result.stdout, /review-done/);
   assert.match(result.stdout, /Review main\.\.\.HEAD/);
+  // Tighten beyond the section label: assert the renderer surfaces the
+  // status and kind label so a regression that drops those fields would
+  // fail this test rather than silently passing.
+  assert.match(result.stdout, /completed/);
+  assert.match(result.stdout, /Copilot Review/);
 });
 
 test("status filters by COPILOT_COMPANION_SESSION_ID when no job id is passed", () => {
@@ -245,6 +241,157 @@ test("cancel without a job id errors when no active jobs exist", () => {
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /No active Copilot jobs to cancel/i);
+});
+
+test("result --json returns a structured payload instead of rendered text", () => {
+  const workspace = makeTempDir();
+  const pluginData = makeTempDir();
+  seedState(workspace, pluginData, {
+    jobs: [
+      {
+        id: "task-json",
+        status: "completed",
+        title: "Copilot Task",
+        jobClass: "task",
+        threadId: "thr_json",
+        summary: "json payload",
+        updatedAt: "2026-04-17T22:00:00.000Z",
+        completedAt: "2026-04-17T22:00:10.000Z"
+      }
+    ],
+    jobFiles: {
+      "task-json": {
+        id: "task-json",
+        status: "completed",
+        title: "Copilot Task",
+        threadId: "thr_json",
+        rendered: "# Copilot Task\n\ndone\n",
+        result: { status: 0, threadId: "thr_json", rawOutput: "done" }
+      }
+    }
+  });
+
+  const result = run(
+    process.execPath,
+    [COMPANION_SCRIPT, "result", "task-json", "--json"],
+    { cwd: workspace, env: buildEnv({ pluginData }) }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.job.id, "task-json");
+  assert.equal(payload.storedJob.status, "completed");
+  assert.equal(payload.storedJob.result.rawOutput, "done");
+});
+
+test("status --json returns a structured snapshot", () => {
+  const workspace = makeTempDir();
+  const pluginData = makeTempDir();
+  seedState(workspace, pluginData, {
+    jobs: [
+      {
+        id: "task-snap",
+        status: "completed",
+        title: "Copilot Task",
+        jobClass: "task",
+        threadId: "thr_snap",
+        summary: "snapshot",
+        updatedAt: "2026-04-17T23:00:00.000Z",
+        completedAt: "2026-04-17T23:00:10.000Z"
+      }
+    ]
+  });
+
+  const result = run(process.execPath, [COMPANION_SCRIPT, "status", "--json"], {
+    cwd: workspace,
+    env: buildEnv({ pluginData })
+  });
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const snapshot = JSON.parse(result.stdout);
+  assert.ok(snapshot.latestFinished, "expected latestFinished on the snapshot");
+  assert.equal(snapshot.latestFinished.id, "task-snap");
+});
+
+test("status <ambiguous-prefix> errors with 'ambiguous' when multiple jobs share the prefix", () => {
+  const workspace = makeTempDir();
+  const pluginData = makeTempDir();
+  seedState(workspace, pluginData, {
+    jobs: [
+      {
+        id: "task-alpha-1",
+        status: "completed",
+        title: "Copilot Task",
+        jobClass: "task",
+        threadId: "thr_a1",
+        summary: "first",
+        updatedAt: "2026-04-17T20:00:00.000Z",
+        completedAt: "2026-04-17T20:00:10.000Z"
+      },
+      {
+        id: "task-alpha-2",
+        status: "completed",
+        title: "Copilot Task",
+        jobClass: "task",
+        threadId: "thr_a2",
+        summary: "second",
+        updatedAt: "2026-04-17T20:01:00.000Z",
+        completedAt: "2026-04-17T20:01:10.000Z"
+      }
+    ]
+  });
+
+  const result = run(
+    process.execPath,
+    [COMPANION_SCRIPT, "status", "task-alpha"],
+    { cwd: workspace, env: buildEnv({ pluginData }) }
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /ambiguous/i);
+});
+
+test("cancel <queued-job> marks the job cancelled without needing a live worker", () => {
+  const workspace = makeTempDir();
+  const pluginData = makeTempDir();
+  seedState(workspace, pluginData, {
+    jobs: [
+      {
+        id: "task-queued",
+        status: "queued",
+        title: "Copilot Task",
+        jobClass: "task",
+        threadId: null,
+        summary: "queued work",
+        pid: 999999, // dead pid; terminateProcessTree no-ops safely
+        updatedAt: "2026-04-17T19:00:00.000Z",
+        createdAt: "2026-04-17T19:00:00.000Z"
+      }
+    ],
+    jobFiles: {
+      "task-queued": {
+        id: "task-queued",
+        status: "queued",
+        title: "Copilot Task",
+        pid: 999999,
+        threadId: null
+      }
+    }
+  });
+
+  const result = run(
+    process.execPath,
+    [COMPANION_SCRIPT, "cancel", "task-queued"],
+    { cwd: workspace, env: buildEnv({ pluginData }) }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /Cancelled/i);
+
+  // Follow-up: state reflects the cancellation.
+  const followUp = run(
+    process.execPath,
+    [COMPANION_SCRIPT, "status", "task-queued"],
+    { cwd: workspace, env: buildEnv({ pluginData }) }
+  );
+  assert.equal(followUp.status, 0, `stderr: ${followUp.stderr}`);
+  assert.match(followUp.stdout, /cancelled/i);
 });
 
 test("cancel <job-id> errors clearly when the job is not active", () => {
