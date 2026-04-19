@@ -86,15 +86,25 @@ export function terminateProcessTree(pid, options = {}) {
         if (error?.code === "ESRCH") {
           return { attempted: true, delivered: false, method: "kill" };
         }
-        throw error;
+        // Best-effort: swallow unexpected kill errors rather than crashing
+        // the caller. Callers such as handleCancel treat termination as
+        // best-effort anyway.
+        return { attempted: true, delivered: false, method: "kill", error };
       }
     }
 
-    if (result.error) {
-      throw result.error;
-    }
-
-    throw new Error(formatCommandFailure(result));
+    // Best-effort: taskkill failed in an unexpected way (e.g., Git-Bash
+    // MSYS path translation mangling the `/PID` flag on Windows). The
+    // process may or may not still be alive; callers treat termination
+    // as advisory. Return a "failed" record instead of throwing so we
+    // don't crash the containing command.
+    return {
+      attempted: true,
+      delivered: false,
+      method: "taskkill",
+      result,
+      error: result.error ?? new Error(formatCommandFailure(result))
+    };
   }
 
   try {
