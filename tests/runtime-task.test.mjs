@@ -86,12 +86,12 @@ test("task --background enqueues a tracked job and persists a queued record", ()
 });
 
 test("task with both --model and --effort emits a stderr notice that --effort was ignored", () => {
-  // Note: the ACP broker is spawned once per Claude session, so the
-  // broker-scoped --model does NOT flow through to the fake's argv on
-  // subsequent calls. The user-visible `--effort ignored because --model`
-  // stderr notice is the behavior under test here; the spawn-arg
-  // assertion for per-call --model is out of scope until the broker
-  // learns to pass model per-session (tracked for v0.3).
+  // Both the stderr notice (emitted by the companion CLI layer) and the
+  // subsequent --model routing (now handled by the per-call CLI fallback)
+  // are under test. Earlier versions of this test deferred the spawn-arg
+  // assertion until the broker learned to honor per-call models; v0.3 ships
+  // the per-call CLI fallback instead (see runCopilotCli in lib/copilot.mjs),
+  // so the per-call --model assertion lives in the dedicated tests below.
   const pluginData = makeTempDir();
   const result = runCompanion(
     ["task", "--model", "haiku", "--effort", "high", "work"],
@@ -99,6 +99,112 @@ test("task with both --model and --effort emits a stderr notice that --effort wa
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   assert.match(result.stderr, /--effort high is ignored because --model claude-haiku-4.5 was also passed/);
+});
+
+function readSpawnLog(spawnLogPath) {
+  if (!fs.existsSync(spawnLogPath)) return [];
+  return fs
+    .readFileSync(spawnLogPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+test("task --model haiku bypasses the broker and passes --model claude-haiku-4.5 via -p", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--model", "haiku", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("CLI output."),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /CLI output\./);
+  const entries = readSpawnLog(spawnLog);
+  const cli = entries.find((entry) => entry.argv.includes("-p"));
+  assert.ok(
+    cli,
+    `expected a -p invocation; argvs: ${JSON.stringify(entries.map((entry) => entry.argv))}`
+  );
+  const modelIdx = cli.argv.indexOf("--model");
+  assert.ok(
+    modelIdx >= 0 && cli.argv[modelIdx + 1] === "claude-haiku-4.5",
+    `expected --model claude-haiku-4.5; got ${JSON.stringify(cli.argv)}`
+  );
+  assert.ok(
+    !cli.argv.includes("--acp"),
+    `per-call CLI path should not pass --acp; got ${JSON.stringify(cli.argv)}`
+  );
+  assert.ok(!entries.some((entry) => entry.argv.includes("--acp")));
+});
+
+test("task --effort low routes through the per-call CLI with --model claude-opus-4.6-fast", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "low", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("fast ok"),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const entries = readSpawnLog(spawnLog);
+  const cli = entries.find((entry) => entry.argv.includes("-p"));
+  assert.ok(cli, `expected a -p invocation; argvs: ${JSON.stringify(entries.map((entry) => entry.argv))}`);
+  const modelIdx = cli.argv.indexOf("--model");
+  assert.ok(
+    modelIdx >= 0 && cli.argv[modelIdx + 1] === "claude-opus-4.6-fast",
+    `expected --model claude-opus-4.6-fast; got ${JSON.stringify(cli.argv)}`
+  );
+});
+
+test("task --effort high routes through the per-call CLI with --model claude-opus-4.6", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "high", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("opus ok"),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const entries = readSpawnLog(spawnLog);
+  const cli = entries.find((entry) => entry.argv.includes("-p"));
+  assert.ok(cli, `expected a -p invocation`);
+  const modelIdx = cli.argv.indexOf("--model");
+  assert.ok(
+    modelIdx >= 0 && cli.argv[modelIdx + 1] === "claude-opus-4.6",
+    `expected --model claude-opus-4.6; got ${JSON.stringify(cli.argv)}`
+  );
+});
+
+test("task without --model stays on the shared broker path (--acp, no --model)", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("broker ok"),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const entries = readSpawnLog(spawnLog);
+  const acp = entries.find((entry) => entry.argv.includes("--acp"));
+  assert.ok(
+    acp,
+    `expected an --acp broker spawn; argvs: ${JSON.stringify(entries.map((entry) => entry.argv))}`
+  );
+  assert.ok(!acp.argv.includes("-p"));
+  assert.ok(!acp.argv.includes("--model"));
 });
 
 test("task surfaces a session/prompt error from Copilot", () => {

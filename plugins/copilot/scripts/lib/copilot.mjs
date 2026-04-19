@@ -9,9 +9,12 @@
  * @typedef {import("./acp-protocol").StopReason} StopReason
  * @typedef {((update: string | { message: string, phase: string | null, threadId?: string | null, turnId?: string | null, stderrMessage?: string | null, logTitle?: string | null, logBody?: string | null }) => void)} ProgressReporter
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import process from "node:process";
+import { spawn } from "node:child_process";
 import { readJsonFile } from "./fs.mjs";
 import {
   ACP_PROTOCOL_VERSION,
@@ -460,8 +463,146 @@ function ensureCopilotAvailable(cwd, options = {}) {
   }
 }
 
+/**
+ * Per-call CLI fallback for `--model`. Copilot CLI exposes `--model` only at
+ * spawn time, so the shared ACP broker (spawned once per Claude session with
+ * fixed flags) cannot honor a per-call model switch. When the caller asks
+ * for a specific model, we bypass the broker entirely and invoke
+ * `copilot -p "<prompt>" --model <model> ...` as a one-shot subprocess.
+ *
+ * The returned shape matches the broker path so renderers, job records, and
+ * status reporters stay identical; the trade-off is coarser progress (we
+ * emit two phase transitions instead of streaming `session/update` events)
+ * and no `copilotSessionId` (the CLI one-shot has no resumable sessionId).
+ */
+async function runCopilotCli(cwd, options = {}) {
+  const env = options.env ?? process.env;
+  const prompt = options.prompt?.trim() || options.defaultPrompt || "";
+  if (!prompt) {
+    throw new Error("A prompt is required for this Copilot run.");
+  }
+
+  const model = String(options.model);
+  const [bin, ...preArgs] = resolveCopilotCommand(env);
+  const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
+  const shell =
+    useCustomCommand || process.platform !== "win32" ? false : env.SHELL || true;
+  const args = [
+    ...preArgs,
+    "-p",
+    prompt,
+    "--allow-all-tools",
+    "--allow-all-paths",
+    "--add-dir",
+    cwd,
+    "--model",
+    model
+  ];
+
+  const threadId = `cli-${crypto.randomUUID()}`;
+  emitProgress(
+    options.onProgress,
+    `Starting Copilot CLI (--model ${model}).`,
+    "starting",
+    { threadId }
+  );
+
+  return await new Promise((resolve) => {
+    let stdoutBuf = "";
+    let stderrBuf = "";
+    const proc = spawn(bin, args, {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell,
+      windowsHide: true
+    });
+    proc.stdout.setEncoding("utf8");
+    proc.stderr.setEncoding("utf8");
+    proc.stdout.on("data", (chunk) => {
+      stdoutBuf += chunk;
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderrBuf += chunk;
+    });
+    proc.on("error", (error) => {
+      emitProgress(
+        options.onProgress,
+        `Copilot CLI failed to start: ${error.message}`,
+        "failed"
+      );
+      resolve(
+        buildCliResult({
+          exit: 1,
+          threadId,
+          model,
+          stdout: stdoutBuf,
+          stderr: stderrBuf,
+          error
+        })
+      );
+    });
+    proc.on("exit", (code, signal) => {
+      const exit = code ?? (signal ? 1 : 0);
+      emitProgress(
+        options.onProgress,
+        exit === 0
+          ? `Copilot CLI completed (${model}).`
+          : `Copilot CLI exited ${signal ? `(signal ${signal})` : `(code ${code})`}.`,
+        exit === 0 ? "finalizing" : "failed"
+      );
+      resolve(
+        buildCliResult({
+          exit,
+          threadId,
+          model,
+          stdout: stdoutBuf,
+          stderr: stderrBuf,
+          error: null
+        })
+      );
+    });
+  });
+}
+
+function buildCliResult({ exit, threadId, model, stdout, stderr, error }) {
+  const trimmed = stdout.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+  return {
+    status: exit === 0 ? 0 : 1,
+    threadId,
+    turnId: threadId,
+    finalMessage: trimmed,
+    reasoningSummary: [],
+    turn: {
+      id: threadId,
+      status: exit === 0 ? "end_turn" : error ? "transport_error" : "failed",
+      model
+    },
+    error,
+    stderr: cleanCopilotStderr(stderr),
+    fileChanges: [],
+    touchedFiles: [],
+    commandExecutions: [],
+    copilotSessionId: null
+  };
+}
+
 export async function runAppServerTurn(cwd, options = {}) {
   ensureCopilotAvailable(cwd, { env: options.env });
+
+  // When the caller pins a per-call --model, route through the one-shot CLI
+  // fallback. Resume is incompatible with this path (the CLI one-shot cannot
+  // load a broker-held sessionId), so a resume request stays on the broker
+  // and we surface a note that --model was dropped.
+  if (options.model && !options.resumeThreadId) {
+    return runCopilotCli(cwd, options);
+  }
+  if (options.model && options.resumeThreadId) {
+    process.stderr.write(
+      `[copilot] --model ${options.model} is ignored when --resume/--resume-last is used; Copilot CLI cannot switch models on a resumed broker session.\n`
+    );
+  }
+
   return withAcpClient(cwd, async (client) => {
     let sessionId = options.resumeThreadId ?? null;
 
