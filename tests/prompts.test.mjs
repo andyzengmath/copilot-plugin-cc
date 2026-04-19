@@ -82,7 +82,9 @@ test("interpolateTemplate does not touch {{AGENT:<name>}} directives (distinct r
 
 test("loadCopilotAgent returns the raw agent file (including front-matter)", () => {
   const agent = loadCopilotAgent(PLUGIN_ROOT, "copilot-code-review");
-  assert.match(agent, /^---\n/);
+  // Match \r?\n so the assertion stays green on Windows checkouts where
+  // git may have converted line endings to CRLF.
+  assert.match(agent, /^---\r?\n/);
   assert.match(agent, /name: copilot-code-review/);
   assert.match(agent, /<structured_output_contract>/);
 });
