@@ -1,0 +1,115 @@
+# Security
+
+## Reporting a vulnerability
+
+If you believe you have found a security issue in this plugin, please
+**file a private report** via GitHub Security Advisories:
+
+- https://github.com/andyzengmath/copilot-plugin-cc/security/advisories/new
+
+Avoid opening a public issue until a fix is available. For issues in the
+underlying GitHub Copilot CLI itself, report them to GitHub Copilot
+instead: https://github.com/github/copilot/security .
+
+## Supported versions
+
+This project is pre-1.0 and only the latest tagged release receives
+security fixes. Older tags are not backported.
+
+## Threat model
+
+### What the plugin is designed to defend against
+
+- **Cross-host attackers.** The plugin never exposes a network listener;
+  the ACP broker listens only on a local Unix socket (macOS/Linux) or a
+  named pipe (Windows). There is no TCP binding and no remote endpoint.
+- **Co-located processes running as a different user.** On macOS and
+  Linux the session directory is created via
+  [`fs.mkdtempSync`](https://nodejs.org/api/fs.html#fsmkdtempsyncprefix-options)
+  (mode `0700` on the directory) and the `broker.json` file is written
+  with `mode: 0o600` and re-`chmod`'d explicitly so a narrower umask
+  cannot widen permissions. The broker additionally requires every
+  connecting client to present a 256-bit random secret in the
+  `initialize` handshake (`initParams._meta.brokerSecret`) before it
+  will accept any other RPC. The secret is rotated every time a new
+  broker is spawned.
+- **Command injection via per-call `--model`.** When `/copilot:task` is
+  invoked with `--model` or `--effort`, the plugin bypasses the broker
+  and spawns `copilot -p "<prompt>" --model <model>` as a one-shot
+  subprocess. On Windows the real Copilot CLI ships as a `.cmd`
+  launcher, so Node's `spawn()` has to use `shell: true` for PATH /
+  PATHEXT resolution — which opens a CVE-2024-27980 ("BatBadBut") class
+  injection surface. The plugin closes this by validating `prompt`,
+  `--model` value, and `cwd` against a conservative shell-metacharacter
+  deny-list (see
+  [`plugins/copilot/scripts/lib/copilot.mjs`](./plugins/copilot/scripts/lib/copilot.mjs))
+  before every spawn. Matches are rejected with a clear error; the
+  caller can reword, or drop `--model`/`--effort` to route through the
+  broker instead, where prompts travel over JSON-RPC and never see a
+  shell.
+
+### What the plugin does *not* defend against
+
+- **Users with local admin / root on the same machine.** A local
+  administrator can read process memory, your home directory, and the
+  Copilot CLI's own config. Plugin state is not hardened against that
+  threat.
+- **Windows ACL defaults.** On Windows `fs.chmod` is largely a no-op.
+  `broker.json`, the plugin job store under `CLAUDE_PLUGIN_DATA`, and
+  the temp session directory inherit the ACLs of their parent (usually
+  `%LOCALAPPDATA%\Temp` or the directory you set via
+  `CLAUDE_PLUGIN_DATA`). Those ACLs typically grant `Administrators`
+  and `SYSTEM` read access. Treat anything stored there as readable by
+  local admin. If your workstation is shared with other admin accounts,
+  do not rely on `broker.json` confidentiality.
+- **Prompt-injection exfiltration from the LLM.** Copilot-the-model can
+  be coerced by a malicious prompt (for example, an attacker-planted
+  comment in a reviewed file) into calling
+  `--allow-all-tools`-permitted operations like `run_command`. The
+  plugin does *not* stop the model from doing this. The broker path
+  auto-approves each tool request with `allow_once` via `firstAllowOption`
+  (see
+  [`plugins/copilot/scripts/lib/acp-client.mjs`](./plugins/copilot/scripts/lib/acp-client.mjs)),
+  never `allow_always`; the per-call CLI path has no such per-tool
+  approval round-trip and runs with `--allow-all-tools --allow-all-paths`
+  for the whole subprocess lifetime.
+- **Supply-chain attacks on Copilot CLI or Node dependencies.** The
+  plugin trusts whatever binary is on `PATH` as `copilot`, the Node
+  runtime you launched with, and the npm packages this repo depends on.
+  Audit those separately (e.g. `npm audit`, package signing).
+- **The user themselves.** The threat model assumes you are running
+  your own user account on your own machine. The plugin does not try to
+  prevent a logged-in user from inspecting or modifying their own
+  plugin state.
+
+## Secrets and paths to know
+
+| Artifact                         | Location                                                         | Notes                                                                                                     |
+| -------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Broker shared secret             | `<CLAUDE_PLUGIN_DATA>/state/<workspace>/broker.json` (`secret`)  | 256-bit random hex; rotated per broker. Mode `0600` on POSIX; Windows ACLs only.                          |
+| Broker socket / named pipe       | `<os.tmpdir()>/cpc-XXXXXX/broker.sock` (Unix) or `\\.\pipe\cpc-…` (Windows) | Unix socket inherits the mkdtemp directory's `0700`. Named pipes are user-scoped.                          |
+| Broker PID / log                 | Alongside the socket in the session dir                          | Cleaned up via `teardownBrokerSession`.                                                                   |
+| Per-workspace job records        | `<CLAUDE_PLUGIN_DATA>/state/<workspace>/jobs/*.json`             | Contains prompt text, threadId, final message excerpts. Treat as you would a local work log.              |
+| `CLAUDE_PLUGIN_DATA`             | Claude Code sets this; otherwise defaults to a per-OS cache dir  | Use this env var to relocate state to a tighter-permission directory if you need it.                      |
+
+## Security-relevant env vars
+
+- `COPILOT_COMPANION_ACP_ENDPOINT` — if set, the plugin reuses an
+  existing broker at that endpoint instead of spawning one. Treat like
+  a trusted local-only path.
+- `COPILOT_COMPANION_ACP_SECRET` — set inside the broker's own child
+  env to hand the secret to the broker process. Users do not normally
+  set this.
+- `COPILOT_COMPANION_COPILOT_COMMAND` — test-only override for the
+  Copilot binary (expects a JSON array, e.g. `["node", "tests/fake-copilot.mjs"]`).
+  Never set this in production; it bypasses the normal PATH-based
+  `copilot` resolution.
+
+## Known limits we plan to revisit
+
+- No native Windows ACL enforcement for `broker.json`. A future change
+  can call `icacls` or the Win32 security API to match the POSIX
+  `0600` intent.
+- The per-call CLI path spawns with `--allow-all-tools --allow-all-paths`
+  unconditionally. Scoping those to `options.write` would require
+  Copilot CLI to support non-interactive tool approval in `-p` mode.
