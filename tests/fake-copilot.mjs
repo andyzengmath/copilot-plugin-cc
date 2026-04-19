@@ -32,6 +32,13 @@
  * plugin always appends it). Other flags (`--allow-all-*`, `--model`)
  * are captured into the `SpawnArgs` buffer for tests that want to assert
  * how the plugin invoked us.
+ *
+ * When invoked with `--version` or `-v` as the first argument, the
+ * fixture prints a banner to stdout and exits 0 without entering ACP
+ * mode. This mirrors the real Copilot CLI's `--version` behavior and
+ * is what makes `getCopilotAvailability` see the fake as "available"
+ * when tests point it at this script via
+ * `COPILOT_COMPANION_COPILOT_COMMAND`.
  */
 
 import fs from "node:fs";

@@ -382,7 +382,7 @@ function buildAuthStatus(fields = {}) {
 }
 
 export async function getCopilotAuthStatus(cwd, options = {}) {
-  const availability = getCopilotAvailability(cwd);
+  const availability = getCopilotAvailability(cwd, { env: options.env });
   if (!availability.available) {
     return {
       available: false,
@@ -420,11 +420,11 @@ export async function getCopilotAuthStatus(cwd, options = {}) {
 }
 
 
-export async function interruptAppServerTurn(cwd, { threadId, turnId }) {
+export async function interruptAppServerTurn(cwd, { threadId, turnId, env } = {}) {
   if (!threadId) {
     return { attempted: false, interrupted: false, transport: null, detail: "missing sessionId" };
   }
-  const availability = getCopilotAvailability(cwd);
+  const availability = getCopilotAvailability(cwd, { env });
   if (!availability.available) {
     return { attempted: false, interrupted: false, transport: null, detail: availability.detail };
   }
@@ -451,8 +451,8 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId }) {
   }
 }
 
-function ensureCopilotAvailable(cwd) {
-  const availability = getCopilotAvailability(cwd);
+function ensureCopilotAvailable(cwd, options = {}) {
+  const availability = getCopilotAvailability(cwd, { env: options.env });
   if (!availability.available) {
     throw new Error(
       "Copilot CLI is not installed or ACP is unavailable. Install with `npm install -g @github/copilot`, then rerun `/copilot:setup`."
@@ -461,7 +461,7 @@ function ensureCopilotAvailable(cwd) {
 }
 
 export async function runAppServerTurn(cwd, options = {}) {
-  ensureCopilotAvailable(cwd);
+  ensureCopilotAvailable(cwd, { env: options.env });
   return withAcpClient(cwd, async (client) => {
     let sessionId = options.resumeThreadId ?? null;
 
