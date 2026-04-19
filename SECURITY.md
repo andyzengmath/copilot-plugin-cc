@@ -41,7 +41,7 @@ security fixes. Older tags are not backported.
   PATHEXT resolution — which opens a CVE-2024-27980 ("BatBadBut") class
   injection surface. The plugin closes this by validating `prompt`,
   `--model` value, and `cwd` against a conservative shell-metacharacter
-  allow-list (see
+  deny-list (see
   [`plugins/copilot/scripts/lib/copilot.mjs`](./plugins/copilot/scripts/lib/copilot.mjs))
   before every spawn. Matches are rejected with a clear error; the
   caller can reword, or drop `--model`/`--effort` to route through the
