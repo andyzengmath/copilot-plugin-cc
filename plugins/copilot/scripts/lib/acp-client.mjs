@@ -93,19 +93,21 @@ function createProtocolError(message, data) {
 }
 
 export function firstAllowOption(options = []) {
-  // Never select allow_always on behalf of the user — that would
-  // persistently widen Copilot's permissions beyond the single call. Only
-  // allow_once is safe to auto-approve. If no allow_once option is offered
-  // we fall back to any non-reject option that is also not allow_always
-  // (which means we simply don't pick one — the request will be cancelled).
+  // Prefer allow_once: it's the only option kind that's safe to
+  // auto-approve because it scopes the permission to the single call.
+  // Never select allow_always, which would persistently widen Copilot's
+  // permissions beyond this invocation. If no allow_once option is
+  // offered, fall back to the first option that is not allow_always,
+  // reject_once, or reject_always (typically a `kind`-less default the
+  // agent intends as the safe pick). If no such option exists, return
+  // null and let the caller send outcome: "cancelled" — SECURITY.md
+  // documents this two-stage behavior under the prompt-injection
+  // exfiltration bullet.
   if (!Array.isArray(options) || options.length === 0) {
     return null;
   }
   const allowOnce = options.find((option) => option?.kind === "allow_once");
   if (allowOnce) return allowOnce;
-  // Heuristic fallback: some agents omit `kind` and expect the first
-  // option to be the safe default. Pick it only if it does NOT look like a
-  // reject/allow_always variant.
   const safeFallback = options.find(
     (option) =>
       typeof option?.optionId === "string" &&
