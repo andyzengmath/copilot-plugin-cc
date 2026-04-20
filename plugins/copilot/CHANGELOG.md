@@ -5,6 +5,67 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.4
+
+Tooling and hardening release: fixes the three pre-existing Windows
+test failures documented since v0.0.1, adds the first CI signal for
+the repo (Linux + Windows matrix), and ships three review-surfaced
+defensive fixups in the prompt loader and SECURITY.md.
+
+Added:
+- `.github/workflows/pull-request-ci.yml`: CI job runs `npm install`,
+  `npm test`, and `npm run build` on every PR and main push, across
+  Ubuntu and Windows. Pinned action SHAs (v6.0.2 checkout, v6.3.0
+  setup-node) on Node 22 (PR #15). First CI run on PR #15 itself
+  passed 16s / 1m45s respectively.
+- `loadPromptTemplate` now does an `fs.existsSync` guard symmetric with
+  `loadCopilotAgent`, so a missing prompt surfaces "Prompt template not
+  found: <name>" instead of a raw Node ENOENT leaking the absolute
+  path (PR #16).
+- `resolveAgentIncludes` now detects a leftover `{{AGENT:<name>}}` in a
+  just-inlined agent body and throws. Prevents a stray-reference or
+  typo in a future agent file from silently reaching the model as
+  literal directive text (PR #16).
+
+Changed / fixed:
+- `scripts/bump-version.mjs`: marks `package-lock.json` as
+  `optional: true`, matching this repo's no-lockfile choice. The 0.0.3
+  bump had to edit version strings manually; 0.0.4 was cut with
+  `node scripts/bump-version.mjs 0.0.4` directly (PR #14).
+- `tests/bump-version.test.mjs`: spawns Node via `process.execPath`
+  instead of bare `"node"`, bypassing the Windows cmd.exe wrapper that
+  split the absolute repo path on the space in "OneDrive - Microsoft"
+  and failed `MODULE_NOT_FOUND` (PR #14).
+- `plugins/copilot/scripts/lib/broker-endpoint.mjs`: unix branch now
+  builds the socket path with `path.posix.join` so the endpoint stays
+  `unix:/tmp/...` even when the function is called on a Windows runner
+  with a POSIX-style sessionDir (PR #14). No-op on production POSIX.
+- Two pre-existing TypeScript build errors fixed with JSDoc-only
+  changes so the CI `npm run build` step runs clean (PR #15):
+  `acp-client.mjs` ACP_PROTOCOL_VERSION keeps its literal `1` type;
+  `copilot.mjs` `interruptAppServerTurn` uses a typed `options = {}`
+  parameter instead of an untyped destructured default.
+- SECURITY.md now names both stages of `firstAllowOption`: prefer
+  `allow_once`, fall back to the first non-reject / non-`allow_always`
+  option (typically a `kind`-less default). Keeps the "never
+  `allow_always`" boundary but fills in the safe-fallback path the
+  code actually implements (PR #16).
+- `.gitignore` explicitly lists `package-lock.json` so a local
+  `npm install` does not create a commit candidate (PR #15).
+
+Test suite: 103 → 106 tests (+2 new prompts unit tests, +1 new
+bump-version optional-lockfile regression). 105 pass, 1 skipped, 0
+fail — the three pre-existing Windows-path failures from 0.0.3 are
+now green. CI runs on every PR going forward.
+
+Deferred to v0.5:
+- `--effort` model-availability fallback (the last remaining
+  design-doc open question). The shape needs real Copilot CLI
+  error-string signatures to detect model-unavailable from other
+  non-zero exits without false positives.
+
+See merged PRs #14, #15, #16 for the full review history.
+
 ## 0.0.3
 
 Per-call `--model` routing, canonical bundled-agent prompts, and a
