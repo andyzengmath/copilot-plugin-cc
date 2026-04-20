@@ -67,10 +67,13 @@ security fixes. Older tags are not backported.
   comment in a reviewed file) into calling
   `--allow-all-tools`-permitted operations like `run_command`. The
   plugin does *not* stop the model from doing this. The broker path
-  auto-approves each tool request with `allow_once` via `firstAllowOption`
-  (see
-  [`plugins/copilot/scripts/lib/acp-client.mjs`](./plugins/copilot/scripts/lib/acp-client.mjs)),
-  never `allow_always`; the per-call CLI path has no such per-tool
+  auto-approves each tool request via `firstAllowOption` in
+  [`plugins/copilot/scripts/lib/acp-client.mjs`](./plugins/copilot/scripts/lib/acp-client.mjs):
+  it prefers `allow_once`, and if no `allow_once` option is offered it
+  falls back to the first option that is not `allow_always`,
+  `reject_once`, or `reject_always` (typically a `kind`-less default).
+  It never selects `allow_always`, so per-call permission widening is
+  the explicit boundary. The per-call CLI path has no such per-tool
   approval round-trip and runs with `--allow-all-tools --allow-all-paths`
   for the whole subprocess lifetime.
 - **Supply-chain attacks on Copilot CLI or Node dependencies.** The
