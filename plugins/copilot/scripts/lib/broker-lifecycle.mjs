@@ -13,6 +13,9 @@ export const PID_FILE_ENV = "COPILOT_COMPANION_ACP_PID_FILE";
 export const LOG_FILE_ENV = "COPILOT_COMPANION_ACP_LOG_FILE";
 export const BROKER_SECRET_ENV = "COPILOT_COMPANION_ACP_SECRET";
 const BROKER_STATE_FILE = "broker.json";
+const BROKER_LOCK_FILE = "broker.lock";
+const BROKER_LOCK_DEFAULT_TIMEOUT_MS = 5000;
+const BROKER_LOCK_POLL_INTERVAL_MS = 25;
 
 function generateBrokerSecret() {
   return crypto.randomBytes(32).toString("hex");
@@ -137,6 +140,86 @@ function resolveBrokerStateFile(cwd) {
   return path.join(resolveStateDir(cwd), BROKER_STATE_FILE);
 }
 
+function resolveBrokerLockFile(cwd) {
+  return path.join(resolveStateDir(cwd), BROKER_LOCK_FILE);
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    // Signal 0 is existence-only on both POSIX and Windows Node.
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // ESRCH → process does not exist. EPERM → exists but signalling denied
+    // (treat as alive; the lock owner is another user's process).
+    if (error?.code === "EPERM") return true;
+    return false;
+  }
+}
+
+function readLockHolderPid(lockPath) {
+  try {
+    const content = fs.readFileSync(lockPath, "utf8");
+    const [pidLine] = content.split("\n");
+    const pid = Number(pidLine);
+    return Number.isInteger(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function tryAcquireLockFile(lockPath) {
+  try {
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    const fd = fs.openSync(lockPath, "wx", 0o600);
+    try {
+      fs.writeSync(fd, `${process.pid}\n${Date.now()}\n`);
+    } finally {
+      fs.closeSync(fd);
+    }
+    return true;
+  } catch (error) {
+    if (error?.code === "EEXIST") return false;
+    throw error;
+  }
+}
+
+async function acquireBrokerLock(lockPath, options = {}) {
+  const timeoutMs = options.timeoutMs ?? BROKER_LOCK_DEFAULT_TIMEOUT_MS;
+  const pollMs = options.pollMs ?? BROKER_LOCK_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    if (tryAcquireLockFile(lockPath)) {
+      return true;
+    }
+    // Steal the lock if the holder process is dead. This keeps a crashed
+    // ensureBrokerSession from wedging every future caller.
+    const holderPid = readLockHolderPid(lockPath);
+    if (holderPid !== null && !isProcessAlive(holderPid)) {
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        // Another contender already stole and replaced it; retry on next loop.
+      }
+      continue;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+function releaseBrokerLock(lockPath) {
+  try {
+    fs.unlinkSync(lockPath);
+  } catch {
+    // Lock may already be gone (stolen after we were declared dead, or the
+    // state dir was cleaned externally). Nothing to recover.
+  }
+}
+
 export function loadBrokerSession(cwd) {
   const stateFile = resolveBrokerStateFile(cwd);
   if (!fs.existsSync(stateFile)) {
@@ -177,35 +260,21 @@ export function clearBrokerSession(cwd) {
   }
 }
 
-async function isBrokerEndpointReady(endpoint) {
+const FAST_PATH_LIVENESS_TIMEOUT_MS = 150;
+const SLOW_PATH_LIVENESS_TIMEOUT_MS = 1000;
+
+async function isBrokerEndpointReady(endpoint, timeoutMs = FAST_PATH_LIVENESS_TIMEOUT_MS) {
   if (!endpoint) {
     return false;
   }
   try {
-    return await waitForBrokerEndpoint(endpoint, 150);
+    return await waitForBrokerEndpoint(endpoint, timeoutMs);
   } catch {
     return false;
   }
 }
 
-export async function ensureBrokerSession(cwd, options = {}) {
-  const existing = loadBrokerSession(cwd);
-  if (existing && (await isBrokerEndpointReady(existing.endpoint))) {
-    return existing;
-  }
-
-  if (existing) {
-    teardownBrokerSession({
-      endpoint: existing.endpoint ?? null,
-      pidFile: existing.pidFile ?? null,
-      logFile: existing.logFile ?? null,
-      sessionDir: existing.sessionDir ?? null,
-      pid: existing.pid ?? null,
-      killProcess: options.killProcess ?? null
-    });
-    clearBrokerSession(cwd);
-  }
-
+async function spawnAndRegisterBroker(cwd, options) {
   const sessionDir = createBrokerSessionDir();
   const endpointFactory = options.createBrokerEndpoint ?? createBrokerEndpoint;
   const endpoint = endpointFactory(sessionDir, options.platform);
@@ -249,6 +318,68 @@ export async function ensureBrokerSession(cwd, options = {}) {
   };
   saveBrokerSession(cwd, session);
   return session;
+}
+
+export async function ensureBrokerSession(cwd, options = {}) {
+  // Fast path: a previously-written broker.json with a live endpoint is
+  // safe to reuse without serialization. Callers that find a dead broker
+  // need to fall through to the locked slow path so that concurrent
+  // sessions on the same workspace don't each spawn their own replacement.
+  const existing = loadBrokerSession(cwd);
+  if (existing && (await isBrokerEndpointReady(existing.endpoint))) {
+    return existing;
+  }
+
+  const lockPath = resolveBrokerLockFile(cwd);
+  const acquired = await acquireBrokerLock(lockPath, {
+    timeoutMs: options.lockTimeoutMs
+  });
+  if (!acquired) {
+    // Another contender held the lock past our timeout. They may have
+    // produced a live broker in the meantime — re-check with the slow-path
+    // liveness budget before giving up.
+    const after = loadBrokerSession(cwd);
+    if (
+      after &&
+      (await isBrokerEndpointReady(after.endpoint, SLOW_PATH_LIVENESS_TIMEOUT_MS))
+    ) {
+      return after;
+    }
+    return null;
+  }
+
+  try {
+    // Re-check inside the critical section with a more generous liveness
+    // timeout. Tearing down and respawning a broker is expensive and
+    // destructive: another client may be mid-stream. Give a busy-but-alive
+    // broker more time to respond before declaring it dead.
+    const inCritical = loadBrokerSession(cwd);
+    if (
+      inCritical &&
+      (await isBrokerEndpointReady(
+        inCritical.endpoint,
+        SLOW_PATH_LIVENESS_TIMEOUT_MS
+      ))
+    ) {
+      return inCritical;
+    }
+
+    if (inCritical) {
+      teardownBrokerSession({
+        endpoint: inCritical.endpoint ?? null,
+        pidFile: inCritical.pidFile ?? null,
+        logFile: inCritical.logFile ?? null,
+        sessionDir: inCritical.sessionDir ?? null,
+        pid: inCritical.pid ?? null,
+        killProcess: options.killProcess ?? null
+      });
+      clearBrokerSession(cwd);
+    }
+
+    return await spawnAndRegisterBroker(cwd, options);
+  } finally {
+    releaseBrokerLock(lockPath);
+  }
 }
 
 export function teardownBrokerSession({ endpoint = null, pidFile, logFile, sessionDir = null, pid = null, killProcess = null }) {
