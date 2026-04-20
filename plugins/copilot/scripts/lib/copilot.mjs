@@ -423,7 +423,12 @@ export async function getCopilotAuthStatus(cwd, options = {}) {
 }
 
 
-export async function interruptAppServerTurn(cwd, { threadId, turnId, env } = {}) {
+/**
+ * @param {string} cwd
+ * @param {{ threadId?: string|null, turnId?: string|null, env?: NodeJS.ProcessEnv }} [options]
+ */
+export async function interruptAppServerTurn(cwd, options = {}) {
+  const { threadId, turnId, env } = options;
   if (!threadId) {
     return { attempted: false, interrupted: false, transport: null, detail: "missing sessionId" };
   }

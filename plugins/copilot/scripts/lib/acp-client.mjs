@@ -35,6 +35,7 @@ const PLUGIN_MANIFEST = JSON.parse(fs.readFileSync(PLUGIN_MANIFEST_URL, "utf8"))
 
 export const BROKER_ENDPOINT_ENV = "COPILOT_COMPANION_ACP_ENDPOINT";
 export const BROKER_BUSY_RPC_CODE = -32001;
+/** @type {1} */
 export const ACP_PROTOCOL_VERSION = 1;
 
 /** @type {ClientInfo} */
