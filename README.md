@@ -76,23 +76,27 @@ Use it when you want:
 - a review of your uncommitted changes
 - a review of your branch compared to a base branch like `main`
 
-Flags: `--base <ref>`, `--wait`, `--background`, optional focus text.
+Flags: `--base <ref>`, `--wait`, `--background`, `--model <name>`,
+`--effort <level>`, optional focus text.
 
 ```bash
 /copilot:review
 /copilot:review --base main
 /copilot:review --background
+/copilot:review --effort high
 ```
 
 ### `/copilot:adversarial-review`
 
 A **steerable** review that challenges the implementation approach and
-design choices rather than just scanning for defects.
+design choices rather than just scanning for defects. Accepts the same
+flags as `/copilot:review`.
 
 ```bash
 /copilot:adversarial-review
 /copilot:adversarial-review --base main challenge whether the caching design is right
 /copilot:adversarial-review --background look for race conditions
+/copilot:adversarial-review --effort high focus on the retry semantics
 ```
 
 ### `/copilot:rescue`
@@ -119,11 +123,18 @@ Flags: `--background`, `--wait`, `--resume`, `--fresh`, `--model <name>`, `--eff
 **Effort → model mapping**: Copilot CLI has no per-call reasoning knob, so
 `--effort` is translated:
 
-| `--effort`         | Model                  |
-|--------------------|------------------------|
-| `none`, `minimal`, `low` | `claude-opus-4.6-fast` |
-| `medium` (default) | `claude-sonnet-4.5`    |
-| `high`, `xhigh`    | `claude-opus-4.6`      |
+| `--effort`                | Model                  | Fallback chain on unavailability                      |
+|---------------------------|------------------------|-------------------------------------------------------|
+| `none`, `minimal`, `low`  | `claude-opus-4.6-fast` | _(already lowest tier)_                               |
+| `medium` (default)        | `claude-sonnet-4.5`    | `claude-opus-4.6-fast`                                |
+| `high`, `xhigh`           | `claude-opus-4.6`      | `claude-sonnet-4.5` → `claude-opus-4.6-fast`          |
+
+If the primary effort-mapped model isn't available on your Copilot
+account, the plugin automatically retries down the chain and surfaces a
+stderr notice showing which tier it landed on. Explicit `--model X`
+never triggers the fallback — your picked model is used as-is. The
+same fallback chain applies to `/copilot:task`, `/copilot:review`, and
+`/copilot:adversarial-review`.
 
 If you pass both `--model` and `--effort`, `--model` wins and `--effort` is
 logged as a no-op.
@@ -160,7 +171,7 @@ See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and
 the per-command porting decisions.
 
-## Status (v0.0.4)
+## Status (v0.0.6)
 
 - Core runtime, broker, companion, and hooks all ported and under test.
 - Standard and adversarial review commands share one prompt-engineered
@@ -170,17 +181,38 @@ the per-command porting decisions.
   between the plugin prompt and `copilot --agent copilot-code-review`.
 - Per-call `--model` / `--effort` routing bypasses the shared ACP
   broker and invokes `copilot -p "<prompt>" --model <model>` as a
-  one-shot subprocess. Prompts are validated against a conservative
-  shell-metacharacter deny-list before every spawn so the one-shot
-  path does not become a cmd.exe injection vector on Windows
-  (CVE-2024-27980 class).
+  one-shot subprocess. Applied uniformly across `/copilot:task`,
+  `/copilot:review`, and `/copilot:adversarial-review`. When the
+  effort-mapped model isn't available on the user's Copilot account,
+  the plugin walks the fallback chain (high → sonnet → fast; medium
+  → fast) with a stderr notice on each retry. Explicit `--model` never
+  auto-falls-back.
+- A conservative shell-metacharacter deny-list fires on the shell-
+  enabled spawn path (Windows production with the real `.cmd`
+  launcher) so user-controlled prompts can't become a cmd.exe
+  injection vector (CVE-2024-27980 class). Under `shell:false` argv
+  passes to `CreateProcess` / `execve` verbatim, so the deny-list
+  is skipped — safely — rather than rejecting legitimately-structured
+  review prompts (XML tags, code fences).
+- All four design-doc "Open questions for implementation time" are
+  resolved as of v0.0.5; v0.0.6 added the review-path extension and
+  hardened the fallback chain (resume short-circuit, empty-chain
+  guard, hoisted `threadName`).
 - Test coverage is end-to-end against a spawnable fake-ACP fixture
-  (`tests/fake-copilot.mjs`). 106 tests across runtime suites and the
-  protocol-agnostic set. CI runs on every PR on Ubuntu + Windows.
-- Deferred to v0.5: `--effort` model-availability fallback (degrade
-  gracefully when a mapped model isn't available to the user's Copilot
-  account). Needs real Copilot CLI error-string signatures to detect
-  the failure mode safely.
+  (`tests/fake-copilot.mjs`). 134 tests across runtime suites, unit
+  tests (SHELL_METACHAR_RE, isModelUnavailableStderr, prompt loader,
+  firstAllowOption, broker endpoint, etc.), and the protocol-agnostic
+  set. CI runs on every PR on Ubuntu + Windows.
+
+Deferred to v0.7+:
+- Setup-time model probe: `/copilot:setup` could pre-check which
+  models in the `--effort` table are available on this Copilot
+  account so users see their tier upfront, instead of discovering it
+  at task time via fallback notices.
+- Cross-Claude-session broker coordination (per design doc
+  "Deferred to v1.1").
+- Structured-output enforcement beyond the current prompt-contract
+  approach (per design doc "Deferred to v1.1").
 
 ## Security
 
