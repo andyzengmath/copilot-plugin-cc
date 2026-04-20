@@ -58,6 +58,35 @@ test("loadPromptTemplate throws a clear error when a referenced agent file is mi
   );
 });
 
+test("loadPromptTemplate throws a clear error when the prompt template itself is missing", () => {
+  const root = seedPromptTree({
+    promptName: "review",
+    promptBody: "<task>placeholder</task>\n"
+  });
+
+  assert.throws(
+    () => loadPromptTemplate(root, "no-such-prompt"),
+    /Prompt template not found: no-such-prompt/
+  );
+});
+
+test("loadPromptTemplate throws when an inlined agent body contains a nested {{AGENT:...}}", () => {
+  const root = seedPromptTree({
+    promptName: "review",
+    promptBody: "{{AGENT:outer}}\n",
+    agents: {
+      outer:
+        "---\nname: outer\n---\n<role>I include {{AGENT:inner}} which should fail.</role>\n",
+      inner: "---\nname: inner\n---\n<role>nested</role>\n"
+    }
+  });
+
+  assert.throws(
+    () => loadPromptTemplate(root, "review"),
+    /Nested \{\{AGENT:\.\.\.\}\} directive in resolved prompt/
+  );
+});
+
 test("loadPromptTemplate leaves prompts without {{AGENT:...}} directives untouched", () => {
   const root = seedPromptTree({
     promptName: "stop-review-gate",
