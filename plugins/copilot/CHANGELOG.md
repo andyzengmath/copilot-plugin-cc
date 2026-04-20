@@ -5,6 +5,52 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.7
+
+Setup-time model availability probe + README catch-up for the v0.5
+and v0.6 changes.
+
+Added:
+- `/copilot:setup --probe-models` (PR #25). Opt-in flag that spawns
+  `copilot -p "ping" --model <m>` in parallel against each unique
+  model in EFFORT_TO_MODEL and reports which tiers are available on
+  the current Copilot account. Results classify via the existing
+  `isModelUnavailableStderr` regex (reuses v0.6's content-policy
+  hardening):
+    - exit 0                                   → `ok — ok`
+    - non-zero + availability phrase           → `unavailable — <stderr first line>`
+    - non-zero + no match                      → `unknown — exit N: ...`
+    - spawn error / 15s timeout                → `unknown — ...`
+  When any model is flagged unavailable, the next-steps section
+  reminds the user that /copilot:task auto-falls-back and names the
+  affected models. Complements the v0.5 runtime fallback chain so
+  users can see their tier upfront rather than discovering it at
+  task time via fallback stderr notices.
+- `probeModelAvailability(cwd, { env, models, timeoutMs })` exported
+  from `plugins/copilot/scripts/lib/copilot.mjs` for programmatic
+  use.
+- `tests/setup-probe.test.mjs` (+4): no-flag baseline (no probe
+  spawns), all-ok path (3 spawns, one per distinct model), one-
+  model-unavailable path (verifies next-steps hint), JSON output
+  shape.
+
+Changed:
+- README refreshed for v0.0.6 → v0.0.7 state (PR #24 & this release):
+  `/copilot:review` and `/copilot:adversarial-review` flag lists now
+  include `--model` / `--effort`; the effort → model table has a
+  fallback-chain column; the Status section replaced with a current-
+  state summary (all design-doc "Open questions for implementation
+  time" resolved, 134→138 tests, CI on every PR); "Deferred to
+  v0.7+" block added for the outstanding v1.1 items (cross-Claude-
+  session broker coordination, structured-output enforcement). The
+  setup-time probe is now documented implicitly via the Status
+  section.
+
+Test suite: 134 → 138 tests (+4 setup-probe cases). 137 pass, 1
+skipped, 0 fail. CI green on both Linux and Windows.
+
+See merged PRs #24, #25 for the full review history.
+
 ## 0.0.6
 
 Fallback-chain hardening and extension to the review path. Small
