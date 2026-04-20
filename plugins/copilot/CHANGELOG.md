@@ -5,6 +5,59 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.6
+
+Fallback-chain hardening and extension to the review path. Small
+release that rounds out the v0.5 --effort work into something
+consistent across all three entry points.
+
+Added:
+- `--effort` support on `/copilot:review` and
+  `/copilot:adversarial-review` (PR #22). The same fallback chain
+  that /copilot:task uses — high → sonnet → fast, medium → fast, low
+  /minimal/none already at the bottom — now applies to review and
+  adversarial-review. Explicit `--model` still opts out; the shared
+  "--effort ignored because --model was also passed" notice fires
+  across all three commands.
+- Background-worker fallback test (PR #21) and resume-collapse test
+  (PR #21). Closes the PR #19 review coverage gap on the worker
+  path and asserts that `--resume-last --effort` does not fire
+  redundant retries against the broker.
+- Unit tests for `SHELL_METACHAR_RE` + `assertNoShellMetachars`
+  (PR #22, new `tests/shell-metachar-regex.test.mjs`). Locks in
+  the deny-list regex semantics and the labeled-error shape.
+
+Changed / fixed:
+- `executeTaskRun` hoists `threadName` and the empty-chain guard
+  out of the retry loop (PR #21). No current bug; pins the
+  invariant if a future `session/new` evolution starts forwarding
+  the field.
+- `executeTaskRun` collapses the fallback chain to a single entry
+  when `resumeThreadId` is set (PR #21). The broker path ignores
+  per-call `--model`, so iterating the full chain fired redundant
+  identical calls and emitted misleading retry notices naming
+  models that were never used. The comment in v0.5 claimed this
+  was already true; this change makes the implementation match.
+- `assertNoShellMetachars` is now scoped to the shell-enabled
+  spawn path (PR #22). Under `shell:false` (Linux / macOS
+  production, all tests) Node hands argv directly to CreateProcess
+  / execve with no shell interpretation, so the CVE-2024-27980
+  class does not apply; the always-on stance in v0.5 was rejecting
+  legitimately-structured review prompts (XML tags, code fences)
+  that never reached a shell. The deny-list still fires on the
+  Windows production path where `shell:true` is needed for `.cmd`
+  launcher resolution.
+- SECURITY.md threat-model bullet updated to reflect the scoping
+  rationale and to note that `--effort` can now spawn up to three
+  sequential one-shot subprocesses through the fallback chain.
+
+Test suite: 121 → 134 tests (+2 new task integration cases from
+PR #21, +3 new review fallback cases from PR #22, +8 new
+SHELL_METACHAR_RE unit tests from PR #22). 133 pass, 1 skipped, 0
+fail. CI green on both `ubuntu-latest` and `windows-latest`.
+
+See merged PRs #21, #22 for the full review history.
+
 ## 0.0.5
 
 Closes the last design-doc open question (`--effort` model-
