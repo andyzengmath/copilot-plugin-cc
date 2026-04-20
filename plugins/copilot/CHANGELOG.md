@@ -5,6 +5,69 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.5
+
+Closes the last design-doc open question (`--effort` model-
+availability fallback) and clears up two doc-debt items surfaced
+during the v0.4 review cycle.
+
+Added:
+- `--effort`-driven fallback chain on `/copilot:task` (PR #19).
+  When the primary effort-mapped model is unavailable on the user's
+  Copilot account, `executeTaskRun` retries down the capability tier
+  rather than failing outright:
+  - `--effort high` / `xhigh`: `claude-opus-4.6` →
+    `claude-sonnet-4.5` → `claude-opus-4.6-fast`.
+  - `--effort medium`: `claude-sonnet-4.5` → `claude-opus-4.6-fast`.
+  - `--effort low`/`minimal`/`none`: already lowest tier, no
+    fallback.
+  Each retry emits a stderr notice so users can see which tier the
+  plugin actually ran on. Explicit `--model X` never triggers the
+  chain — the user picked that model deliberately.
+- `isModelUnavailableStderr()` exported from
+  `plugins/copilot/scripts/lib/copilot.mjs` — conservative regex
+  matching only the well-known availability phrases ("not available",
+  "unavailable", "not authorized", "access denied", "access required",
+  "no access", "forbidden for/on/to …", "requires <X>
+  tier/plan/subscription"). A generic non-zero exit (network glitch,
+  content-policy rejection, tool failure) does NOT trigger the
+  chain. Hardened in the fixup to reject bare `forbidden` (common in
+  content-policy stderr) and to confine matching to the same line so
+  cross-paragraph text can't accidentally conflate into a false
+  positive.
+- `tests/is-model-unavailable-stderr.test.mjs` — 10 unit tests
+  covering six positive availability phrases and four negatives
+  (content-policy `forbidden`, cross-paragraph, generic network,
+  stderr without a `model` token).
+- `tests/runtime-task.test.mjs` — 5 new integration tests across
+  the fallback chain: happy-path retry, chain exhaustion, explicit-
+  model opt-out, no retry on primary success, no retry on non-
+  availability failure.
+
+Changed / fixed:
+- `firstAllowOption` comment in `acp-client.mjs` rewritten (PR #18):
+  the old parenthetical claimed the safe-fallback branch "means we
+  simply don't pick one — the request will be cancelled", but the
+  code below picks a non-reject, non-`allow_always` option when one
+  exists. Comment now matches both the implementation and SECURITY.md.
+- README status section refreshed from the stale "v0.2 status" to a
+  "Status (v0.0.4)" (now implicitly v0.0.5) snapshot that removes
+  items already shipped (per-call `--model`, Windows-path test
+  failures) and names the single remaining deferred item — now
+  closed as of this release. README's leftover "allow-list" was
+  also swapped to "deny-list" to match the SECURITY.md PR #12 fixup
+  (PR #18).
+
+Test suite: 106 → 121 tests (+10 new unit tests for
+`isModelUnavailableStderr`, +5 new task integration tests). 120
+pass, 1 skipped, 0 fail. CI green on both Linux and Windows.
+
+Design-doc status: all four "Open questions for implementation time"
+from `docs/plans/2026-04-17-copilot-plugin-cc-design.md` are now
+resolved.
+
+See merged PRs #18, #19 for the full review history.
+
 ## 0.0.4
 
 Tooling and hardening release: fixes the three pre-existing Windows
