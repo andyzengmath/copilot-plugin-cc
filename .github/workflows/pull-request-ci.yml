@@ -1,0 +1,51 @@
+name: Pull Request CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux is the production target; Windows is included so the v0.4
+        # Windows-quirk fixes (PR #14) stay green and any future regression
+        # in the broker named-pipe / shell-wrapper paths surfaces in CI
+        # rather than only on a contributor's local checkout.
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          # Engines field requires >=18.18.0; 22 is the current LTS.
+          node-version: 22
+
+      - name: Install dependencies
+        # No package-lock.json is checked in (the plugin pulls Copilot CLI
+        # at runtime rather than shipping locked deps), so `npm ci` is not
+        # an option. The two devDependencies (@types/node, typescript) are
+        # only needed for the build step; `npm install` keeps the
+        # workflow self-contained.
+        run: npm install --no-audit --no-fund
+
+      - name: Run test suite
+        # Tests use tests/fake-copilot.mjs as the spawnable Copilot fixture
+        # (via COPILOT_COMPANION_COPILOT_COMMAND), so the real `copilot`
+        # binary is intentionally NOT installed in CI.
+        run: npm test
+
+      - name: Run build
+        run: npm run build
