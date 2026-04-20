@@ -401,11 +401,44 @@ async function executeReviewRun(request) {
   // contract rather than runtime sandbox (Copilot CLI has no per-session
   // sandbox knob). The review prompt templates explicitly tell the agent
   // not to modify files.
-  const result = await runAppServerTurn(context.repoRoot, {
-    prompt,
-    model: request.model,
-    onProgress: request.onProgress
+  //
+  // --effort driven model selection on the review path shares the same
+  // availability fallback chain as /copilot:task: a missing top-tier
+  // model degrades to the next tier rather than failing outright.
+  // Review never takes `--resume-last`, so the chain is always the full
+  // build result; explicit `--model` still opts out (single-element).
+  const modelChain = buildEffortModelChain({
+    requestedModel: request.requestedModel ?? null,
+    effort: request.effort ?? null,
+    primaryModel: request.model
   });
+  if (modelChain.length === 0) {
+    throw new Error(
+      `Internal: buildEffortModelChain returned an empty chain for effort=${request.effort}.`
+    );
+  }
+  let result;
+  for (let i = 0; i < modelChain.length; i += 1) {
+    const candidate = modelChain[i];
+    result = await runAppServerTurn(context.repoRoot, {
+      prompt,
+      model: candidate,
+      onProgress: request.onProgress
+    });
+    if (result.status === 0) break;
+    const hasNext = i < modelChain.length - 1;
+    if (!hasNext) break;
+    if (
+      !isModelUnavailableStderr(result.stderr) &&
+      !isModelUnavailableStderr(result.error?.message ?? "")
+    ) {
+      break;
+    }
+    process.stderr.write(
+      `[copilot] --model ${candidate} appears unavailable on this account; ` +
+        `retrying with --model ${modelChain[i + 1]} (--effort ${request.effort} fallback chain).\n`
+    );
+  }
   const parsed = parseStructuredOutput(result.finalMessage, {
     status: result.status,
     failureMessage: result.error?.message ?? result.stderr
@@ -732,7 +765,7 @@ function enqueueBackgroundTask(cwd, job, request) {
 
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model", "cwd"],
+    valueOptions: ["base", "scope", "model", "effort", "cwd"],
     booleanOptions: ["json", "background", "wait"],
     aliasMap: {
       m: "model"
@@ -746,6 +779,22 @@ async function handleReviewCommand(argv, config) {
     base: options.base,
     scope: options.scope
   });
+
+  // Share /copilot:task's --effort → model mapping so the two commands
+  // expose a single capability-tier vocabulary. Apply the same "--model
+  // wins, --effort is a no-op" rule and the same unknown-effort notice.
+  const effort = normalizeReasoningEffort(options.effort);
+  const requestedModel = normalizeRequestedModel(options.model);
+  const model = applyEffortFallbackModel(requestedModel, effort);
+  if (requestedModel && effort) {
+    process.stderr.write(
+      `[copilot] --effort ${effort} is ignored because --model ${requestedModel} was also passed.\n`
+    );
+  } else if (effort && !requestedModel && !EFFORT_TO_MODEL.has(effort)) {
+    process.stderr.write(
+      `[copilot] --effort ${effort} has no mapped model; Copilot CLI will use its config default.\n`
+    );
+  }
 
   config.validateRequest?.(target, focusText);
   const metadata = buildReviewJobMetadata(config.reviewName, target);
@@ -764,7 +813,9 @@ async function handleReviewCommand(argv, config) {
         cwd,
         base: options.base,
         scope: options.scope,
-        model: options.model,
+        model,
+        requestedModel,
+        effort,
         focusText,
         reviewName: config.reviewName,
         onProgress: progress

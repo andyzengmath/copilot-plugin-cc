@@ -195,6 +195,123 @@ test("adversarial-review renders findings and supports focus text after the flag
   assert.match(result.stdout, /Cache invalidation is not idempotent\./);
 });
 
+function readSpawnLog(spawnLogPath) {
+  if (!fs.existsSync(spawnLogPath)) return [];
+  return fs
+    .readFileSync(spawnLogPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+test("review --effort high falls back to --model claude-sonnet-4.5 when claude-opus-4.6 is unavailable", () => {
+  const pluginData = makeTempDir();
+  const repo = seedDirtyRepo();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+
+  const result = runCompanion(
+    repo,
+    ["review", "--effort", "high"],
+    {
+      pluginData,
+      script: {
+        ...scriptedJsonReview({
+          verdict: "approve",
+          summary: "sonnet-level review ok",
+          findings: [],
+          next_steps: []
+        }),
+        unavailableModels: ["claude-opus-4.6"]
+      },
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /Verdict: approve/);
+  assert.match(
+    result.stderr,
+    /claude-opus-4\.6.*unavailable.*retrying.*claude-sonnet-4\.5.*fallback chain/i,
+    `expected fallback notice on stderr; got: ${result.stderr}`
+  );
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(
+    cliEntries.length,
+    2,
+    `expected two -p invocations (opus → sonnet); got ${cliEntries.length}`
+  );
+  const firstModel = cliEntries[0].argv[cliEntries[0].argv.indexOf("--model") + 1];
+  const secondModel = cliEntries[1].argv[cliEntries[1].argv.indexOf("--model") + 1];
+  assert.equal(firstModel, "claude-opus-4.6");
+  assert.equal(secondModel, "claude-sonnet-4.5");
+});
+
+test("review --effort high with explicit --model opus does NOT auto-fallback", () => {
+  const pluginData = makeTempDir();
+  const repo = seedDirtyRepo();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+
+  const result = runCompanion(
+    repo,
+    ["review", "--effort", "high", "--model", "opus"],
+    {
+      pluginData,
+      script: {
+        ...scriptedJsonReview({
+          verdict: "approve",
+          summary: "never seen",
+          findings: [],
+          next_steps: []
+        }),
+        unavailableModels: ["claude-opus-4.6"]
+      },
+      spawnLog
+    }
+  );
+  assert.notEqual(result.status, 0);
+  // --effort-ignored-because-of-model notice fires (shared with the task path);
+  // but no retry notice, because the user explicitly picked the model.
+  assert.match(
+    result.stderr,
+    /--effort high is ignored because --model claude-opus-4\.6 was also passed/
+  );
+  assert.doesNotMatch(
+    result.stderr,
+    /appears unavailable on this account.*retrying/i,
+    `explicit --model must not trigger fallback; stderr was: ${result.stderr}`
+  );
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 1, "explicit --model should produce exactly one spawn attempt");
+});
+
+test("review --effort high with opus available does not retry", () => {
+  const pluginData = makeTempDir();
+  const repo = seedDirtyRepo();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+
+  const result = runCompanion(
+    repo,
+    ["review", "--effort", "high"],
+    {
+      pluginData,
+      script: scriptedJsonReview({
+        verdict: "approve",
+        summary: "primary ok",
+        findings: [],
+        next_steps: []
+      }),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 1, "no fallback expected when primary model succeeds");
+  const modelIdx = cliEntries[0].argv.indexOf("--model");
+  assert.equal(cliEntries[0].argv[modelIdx + 1], "claude-opus-4.6");
+});
+
 test("review persists a job record with copilotSessionId after completion", () => {
   const pluginData = makeTempDir();
   const repo = seedDirtyRepo();

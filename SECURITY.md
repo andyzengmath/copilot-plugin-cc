@@ -48,10 +48,16 @@ security fixes. Older tags are not backported.
   `--model` value, and `cwd` against a conservative shell-metacharacter
   deny-list (see
   [`plugins/copilot/scripts/lib/copilot.mjs`](./plugins/copilot/scripts/lib/copilot.mjs))
-  before every spawn. Matches are rejected with a clear error; the
-  caller can reword, or drop `--model`/`--effort` to route through the
-  broker instead, where prompts travel over JSON-RPC and never see a
-  shell.
+  before every shell-enabled spawn. The check is scoped to the
+  shell-enabled path because `spawn` with `shell:false` hands argv
+  directly to `CreateProcess` / `execve` without shell interpretation,
+  so metacharacters are literal — the deny-list would only false-
+  positive on legitimately-structured content (XML tags in review
+  prompts, quoted arguments) that never reaches a shell. On Windows
+  with the real Copilot `.cmd` launcher, `shell` is truthy and the
+  guard is active. Matches are rejected with a clear error; the caller
+  can reword, or drop `--model`/`--effort` to route through the broker
+  instead, where prompts travel over JSON-RPC and never see a shell.
 
 ### What the plugin does *not* defend against
 

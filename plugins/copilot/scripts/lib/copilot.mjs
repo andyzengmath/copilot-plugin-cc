@@ -504,9 +504,9 @@ export function isModelUnavailableStderr(text) {
 // flag — callers hitting this can reword or drop `--model`/`--effort` to
 // route through the ACP broker, where prompts travel over JSON-RPC and
 // never reach a shell.
-const SHELL_METACHAR_RE = /[`$&|;<>^"\r\n\x00]|%[^%]*%/;
+export const SHELL_METACHAR_RE = /[`$&|;<>^"\r\n\x00]|%[^%]*%/;
 
-function assertNoShellMetachars(value, label) {
+export function assertNoShellMetachars(value, label) {
   if (typeof value !== "string" || SHELL_METACHAR_RE.test(value)) {
     throw new Error(
       `Refusing to spawn Copilot CLI: ${label} contains a shell metacharacter ` +
@@ -546,14 +546,22 @@ async function runCopilotCli(cwd, options = {}) {
   }
 
   const model = String(options.model);
-  assertNoShellMetachars(prompt, "prompt");
-  assertNoShellMetachars(model, "--model value");
-  assertNoShellMetachars(cwd, "working directory");
-
   const [bin, ...preArgs] = resolveCopilotCommand(env);
   const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
   const shell =
     useCustomCommand || process.platform !== "win32" ? false : env.SHELL || true;
+  // CVE-2024-27980 is specifically a cmd.exe / shell-string issue: it
+  // applies only when `spawn` routes through a shell, because otherwise
+  // argv is handed to CreateProcess (Windows) or execve (POSIX) verbatim
+  // with no shell interpretation. Plugin-generated review prompts
+  // legitimately carry XML tags and quotes, so apply the deny-list only
+  // on the shell-enabled path rather than failing closed on structurally
+  // valid content that will never hit a shell.
+  if (shell) {
+    assertNoShellMetachars(prompt, "prompt");
+    assertNoShellMetachars(model, "--model value");
+    assertNoShellMetachars(cwd, "working directory");
+  }
   const args = [
     ...preArgs,
     "-p",

