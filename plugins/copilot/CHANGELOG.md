@@ -5,6 +5,62 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.8
+
+Finishes the two `v1.1`-deferred items that were tractable: concurrent
+broker reuse across Claude sessions on the same workspace, and full
+schema enforcement for structured review output. Item 3 (custom per-
+ACP-session sandboxing) stays upstream-blocked on `copilot --acp`.
+
+Changed:
+- `ensureBrokerSession` now serializes its read-decide-spawn slow path
+  through a workspace-scoped `broker.lock` file (PR #28). Two Claude
+  sessions starting on the same workspace simultaneously previously
+  raced to each spawn their own detached `copilot --acp` broker — the
+  loser stayed alive as an orphan with no reference from `broker.json`.
+  Now one wins the lock, spawns, and saves; siblings pick it up from
+  `broker.json` and reuse. Fast path (live `broker.json` + reachable
+  endpoint) still skips the lock so single-session reuse stays zero-
+  overhead.
+  - Lock file: atomic `O_CREAT|O_EXCL` via `fs.openSync(path, "wx", 0o600)`,
+    contents `<pid>\n<timestamp>\n`, 25 ms poll with 5 s total budget.
+  - Stale-lock recovery: if the holder PID is dead (ESRCH from
+    `process.kill(pid, 0)`), a contender steals the lock.
+  - `releaseBrokerLock` unlinks in a finally block so a mid-spawn
+    throw still clears the lock.
+- Dual-budget liveness check (`isBrokerEndpointReady`, PR #28): the
+  fast path (outer) keeps its 150 ms budget because reuse is latency-
+  sensitive, but the slow-path re-check before tearing down a sibling
+  broker now uses 1000 ms. Teardown is destructive (kills a broker
+  another client may be mid-stream with), so the slow path now demands
+  a more generous dead-broker signal.
+- `validateReviewResultShape` → `validateReviewOutput` (PR #29): the
+  review pipeline now walks every constraint in
+  `plugins/copilot/schemas/review-output.schema.json` and accumulates
+  the full list of violations, instead of short-circuiting on the
+  first. `renderReviewResult` surfaces them as a bulleted "Schema
+  violations:" section. Now enforced: `verdict` enum, `summary`
+  non-empty, every `findings[i]` required field with correct type
+  (severity enum; title/body/file non-empty; line_start/line_end
+  integer ≥ 1; confidence ∈ [0, 1]; recommendation string),
+  `next_steps[i]` non-empty, no extra properties at top level or
+  inside findings. Zero new runtime deps — hand-rolled walker,
+  faithful to the one schema.
+
+Added:
+- `tests/broker-lifecycle.test.mjs` (+2): concurrent Promise.all of
+  two `ensureBrokerSession` calls must share one broker endpoint +
+  secret and record exactly one `--acp` spawn; sequential reentrant
+  case still reuses through the fast path.
+- `tests/render.test.mjs` (+7): coverage for each new schema
+  constraint plus a "every violation in one pass" regression guard
+  against first-error short-circuit.
+
+Test suite: 138 → 147 tests (+9). 146 pass, 1 skipped, 0 fail. CI
+green on both Linux and Windows.
+
+See merged PRs #28, #29 for the full review history.
+
 ## 0.0.7
 
 Setup-time model availability probe + README catch-up for the v0.5
