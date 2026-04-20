@@ -470,14 +470,27 @@ function ensureCopilotAvailable(cwd, options = {}) {
 
 // A failure from the per-call CLI looks like a model-availability problem
 // when stderr names a "model" alongside one of the well-known availability
-// signals. The pattern is intentionally conservative — it must mention
-// "model" AND one of the availability indicators — so generic non-zero
-// exits (network glitch, prompt-rejected, tool failure) do NOT trigger
-// the --effort fallback chain in copilot-companion.mjs. If a real Copilot
-// CLI release uses a phrase outside this set, the fallback simply does
-// not engage and the user sees the original error: a safe failure mode.
+// signals. The pattern is intentionally conservative:
+//
+// 1. Must mention "model" AND an availability indicator on the SAME LINE
+//    ([^\n] instead of [\s\S]) within ~80 chars. Cross-paragraph matches
+//    would conflate unrelated sentences that just happen to co-occur.
+// 2. Availability indicators are phrases specific to model access control
+//    ("not available", "not authorized", "access denied", "access required",
+//    "no access", "requires <X> tier|plan|subscription") plus the qualified
+//    form "forbidden for/on/to …" which specifically means access-denied
+//    for the caller. Bare "forbidden" is NOT an indicator because content-
+//    policy rejections commonly read "…was forbidden by content policy",
+//    which is a different failure class that should surface verbatim
+//    rather than silently swap models.
+//
+// A generic non-zero exit (network glitch, prompt rejected, tool failure,
+// content-policy block) does NOT trigger the --effort fallback chain in
+// copilot-companion.mjs. If a real Copilot CLI release uses an
+// availability phrase outside this set, the fallback simply does not
+// engage — safe failure mode, user sees the original error.
 const MODEL_UNAVAILABLE_RE =
-  /\bmodel\b[\s\S]{0,80}?\b(?:not\s*available|unavailable|not\s*authorized|access\s*denied|forbidden|requires?\s+(?:a\s+)?[\w-]*\s*(?:tier|plan|subscription)|access\s*required|no\s*access)\b/i;
+  /\bmodel\b[^\n]{0,80}?\b(?:not\s*available|unavailable|not\s*authorized|access\s*denied|forbidden\s+(?:for|on|to)\b|requires?\s+(?:a\s+)?[\w-]*\s*(?:tier|plan|subscription)|access\s*required|no\s*access)\b/i;
 
 export function isModelUnavailableStderr(text) {
   if (typeof text !== "string" || !text) return false;
