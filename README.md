@@ -160,35 +160,34 @@ See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and
 the per-command porting decisions.
 
-## v0.2 status
+## Status (v0.0.4)
 
 - Core runtime, broker, companion, and hooks all ported and under test.
-- Standard and adversarial review commands share one prompt-engineered path
-  (Copilot has no native `review/start` RPC).
-- Bundled Copilot agent definitions live in `plugins/copilot/copilot-agents/`
-  for users who want to invoke the same review contracts from interactive
-  Copilot: `copilot --agent copilot-code-review`.
-- Test coverage is now end-to-end against a spawnable fake-ACP fixture
-  (`tests/fake-copilot.mjs`). Suites: `runtime-task`, `runtime-review`,
-  `runtime-status-result-cancel`, `runtime-hooks`, `commands`, plus the
-  protocol-agnostic set (git, process, render, state, broker-endpoint,
-  broker-lifecycle, acp-client-allow-option, fake-copilot).
-- Deferred to v0.3: per-session `--model` plumbing through the shared
-  broker (broker is spawned once per Claude session, so per-call `--model`
-  does not reach the upstream spawn); the multi-provider setup/auth
-  tests from codex-plugin-cc (Codex-specific `account/read` + `config/read`
-  contracts need a Copilot-native rewrite); shared-broker lazy-startup
-  assertions.
-- On Windows workspaces whose path contains spaces, `bump-version` and
-  similar subprocess-style tests may fail with `MODULE_NOT_FOUND` because
-  of a `spawnSync` quoting issue inherited from codex-plugin-cc. Move the
-  repo to a path without spaces to work around it.
+- Standard and adversarial review commands share one prompt-engineered
+  path (Copilot has no native `review/start` RPC). The `copilot-agents/`
+  files are the canonical review methodology; the runtime prompt
+  templates include them via `{{AGENT:<name>}}` so there's no drift
+  between the plugin prompt and `copilot --agent copilot-code-review`.
+- Per-call `--model` / `--effort` routing bypasses the shared ACP
+  broker and invokes `copilot -p "<prompt>" --model <model>` as a
+  one-shot subprocess. Prompts are validated against a conservative
+  shell-metacharacter deny-list before every spawn so the one-shot
+  path does not become a cmd.exe injection vector on Windows
+  (CVE-2024-27980 class).
+- Test coverage is end-to-end against a spawnable fake-ACP fixture
+  (`tests/fake-copilot.mjs`). 106 tests across runtime suites and the
+  protocol-agnostic set. CI runs on every PR on Ubuntu + Windows.
+- Deferred to v0.5: `--effort` model-availability fallback (degrade
+  gracefully when a mapped model isn't available to the user's Copilot
+  account). Needs real Copilot CLI error-string signatures to detect
+  the failure mode safely.
 
 ## Security
 
 See [SECURITY.md](SECURITY.md) for the threat model, the Windows ACL
-caveat on `broker.json`, the per-call CLI shell-metacharacter allow-list,
-and how to report vulnerabilities via a private GitHub Security Advisory.
+caveat on `broker.json`, the per-call CLI shell-metacharacter deny-list,
+and how to report vulnerabilities via a private GitHub Security
+Advisory.
 
 ## License
 
