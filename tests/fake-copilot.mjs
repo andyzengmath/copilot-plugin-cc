@@ -106,6 +106,22 @@ if (spawnLogPath) {
 // scripted `prompt.updates` so the per-call-model fallback in copilot.mjs
 // has something to parse.
 if (cliArgs[0] === "-p") {
+  const modelArgIdx = cliArgs.indexOf("--model");
+  const invokedModel = modelArgIdx >= 0 ? cliArgs[modelArgIdx + 1] : null;
+  // `script.unavailableModels: ["claude-opus-4.6"]` lets tests simulate
+  // the user's Copilot account not having access to specific models, so
+  // the --effort fallback chain in copilot-companion.mjs can be
+  // exercised end-to-end. The error string mentions "model" + a known
+  // availability indicator so isModelUnavailableStderr matches.
+  const unavailable = Array.isArray(script?.unavailableModels)
+    ? script.unavailableModels
+    : [];
+  if (invokedModel && unavailable.includes(invokedModel)) {
+    process.stderr.write(
+      `Error: model ${invokedModel} is not available on this Copilot account.\n`
+    );
+    process.exit(1);
+  }
   const updates = Array.isArray(script?.prompt?.updates) ? script.prompt.updates : [];
   const text = updates
     .map((update) =>
