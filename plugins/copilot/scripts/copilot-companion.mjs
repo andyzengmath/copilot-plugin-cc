@@ -484,12 +484,36 @@ async function executeTaskRun(request) {
   // Copilot account is on a tier without claude-opus-4.6) degrades to
   // the next tier rather than failing outright. Resume forces the
   // broker path, where per-call --model is dropped anyway, so the chain
-  // is a single-element no-op there.
-  const modelChain = buildEffortModelChain({
+  // is collapsed to a single element below.
+  const builtChain = buildEffortModelChain({
     requestedModel: request.requestedModel ?? null,
     effort: request.effort ?? null,
     primaryModel: request.model
   });
+  // Collapse to a single element on resume: the broker path ignores
+  // per-call --model, so iterating the full chain would fire N identical
+  // broker calls with misleading retry notices naming models that were
+  // never used. Keep the first entry so `result.model` in turn metadata
+  // stays consistent with what the companion originally asked for.
+  const modelChain = resumeThreadId && builtChain.length > 1 ? [builtChain[0]] : builtChain;
+  // Defense against a future change that could produce an empty chain
+  // (e.g. a buildEffortModelChain rewrite that filters everything). The
+  // loop body writes to `result`, and downstream code reads
+  // `result.finalMessage` — a silent crash on `undefined` would be worse
+  // than a loud precondition.
+  if (modelChain.length === 0) {
+    throw new Error(
+      `Internal: buildEffortModelChain returned an empty chain for effort=${request.effort}.`
+    );
+  }
+  // Compute threadName once rather than on every retry iteration; its
+  // inputs (resumeThreadId, request.prompt) are loop-invariant, and if
+  // a future `session/new` evolution forwards threadName, duplicating
+  // calls inside the loop would register multiple sessions under the
+  // same name.
+  const threadName = resumeThreadId
+    ? null
+    : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT);
   let result;
   for (let i = 0; i < modelChain.length; i += 1) {
     const candidate = modelChain[i];
@@ -499,7 +523,7 @@ async function executeTaskRun(request) {
       defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
       model: candidate,
       onProgress: request.onProgress,
-      threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
+      threadName
     });
     if (result.status === 0) break;
     const hasNext = i < modelChain.length - 1;

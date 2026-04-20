@@ -36,7 +36,12 @@ security fixes. Older tags are not backported.
 - **Command injection via per-call `--model`.** When `/copilot:task` is
   invoked with `--model` or `--effort`, the plugin bypasses the broker
   and spawns `copilot -p "<prompt>" --model <model>` as a one-shot
-  subprocess. On Windows the real Copilot CLI ships as a `.cmd`
+  subprocess. With `--effort` (no explicit `--model`) the plugin may
+  spawn up to three such subprocesses in sequence as it walks the
+  model-availability fallback chain in
+  [`plugins/copilot/scripts/copilot-companion.mjs`](./plugins/copilot/scripts/copilot-companion.mjs);
+  the per-spawn attack surface described here is identical on every
+  iteration. On Windows the real Copilot CLI ships as a `.cmd`
   launcher, so Node's `spawn()` has to use `shell: true` for PATH /
   PATHEXT resolution — which opens a CVE-2024-27980 ("BatBadBut") class
   injection surface. The plugin closes this by validating `prompt`,
