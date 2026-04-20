@@ -58,7 +58,7 @@ function validateReviewFinding(finding, index, errors) {
 
   for (const field of ["title", "body", "file"]) {
     const value = finding[field];
-    if (typeof value !== "string" || value.length === 0) {
+    if (typeof value !== "string" || value.trim().length === 0) {
       errors.push(`${prefix}.${field} must be a non-empty string.`);
     }
   }
@@ -105,7 +105,7 @@ function validateReviewOutput(data) {
     );
   }
 
-  if (typeof data.summary !== "string" || data.summary.length === 0) {
+  if (typeof data.summary !== "string" || data.summary.trim().length === 0) {
     errors.push("Missing non-empty string `summary`.");
   }
 

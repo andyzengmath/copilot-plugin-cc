@@ -136,6 +136,34 @@ test("renderReviewResult rejects empty-string next_steps entries", () => {
   assert.match(output, /next_steps\[0\].*non-empty string/);
 });
 
+test("renderReviewResult rejects whitespace-only summary/title/body/file", () => {
+  const output = renderSchemaFailure({
+    verdict: "approve",
+    summary: "   ",
+    findings: [
+      {
+        severity: "low",
+        title: "  ",
+        body: "\t\n",
+        file: " ",
+        line_start: 1,
+        line_end: 1,
+        confidence: 0.5,
+        recommendation: "ok"
+      }
+    ],
+    next_steps: []
+  });
+
+  // All four minLength:1 fields should be rejected when the value is
+  // only whitespace — otherwise Copilot can satisfy the schema with
+  // meaningless input (e.g. " " for a file path).
+  assert.match(output, /Missing non-empty string `summary`\./);
+  assert.match(output, /findings\[0\]\.title/);
+  assert.match(output, /findings\[0\]\.body/);
+  assert.match(output, /findings\[0\]\.file/);
+});
+
 test("renderReviewResult rejects unknown top-level properties", () => {
   const output = renderSchemaFailure({
     verdict: "approve",
