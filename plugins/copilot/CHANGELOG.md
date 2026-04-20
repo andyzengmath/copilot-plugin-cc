@@ -5,6 +5,45 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.9
+
+Small polish cycle on the review-output render path introduced by
+v0.0.8, closing the three follow-ups parked in the post-v0.0.8
+handoff. No user-visible behavior changes for valid Copilot output;
+tightens error-reporting for whitespace-only input and removes
+unreachable defensive code.
+
+Changed:
+- `validateReviewOutput` is now file-local (PR #32). It was exported
+  by PR #29 but had no external caller — every consumer is inside
+  `renderReviewResult`. Keeping it unexported avoids implying a
+  public surface that isn't used.
+- `normalizeReviewFinding` simplified to just `.trim()` every string
+  (PR #32). The pre-v0.0.8 defensive fallbacks (`"low"` severity,
+  `"Finding N"` title, `"No details provided."` body, `"unknown"`
+  file, null-line-start tolerance, reorder guard on line_end) were
+  unreachable after `validateReviewOutput` started running first;
+  the trimmed happy-path is now the only path. Drops ~20 lines.
+- Review-output `minLength: 1` string validators now align on
+  `.trim().length === 0` across `summary` / `findings[*].title /
+  .body / .file` / `next_steps[i]` (PR #33). Before, `next_steps`
+  used `.trim()` while the other four used raw `.length`, so
+  Copilot could satisfy the schema with `summary: "   "` or
+  `file: " "` and the validator would accept it. Consistent
+  rejection of whitespace-only strings across all five fields.
+  Deliberately stricter than the literal JSON Schema
+  `minLength: 1` semantics — see PR #33 description for the
+  rationale.
+
+Added:
+- `tests/render.test.mjs`: `renderReviewResult rejects whitespace-
+  only summary/title/body/file` (+1 case).
+
+Test suite: 147 → 148 tests (+1). 147 pass, 1 skipped, 0 fail. CI
+green on both Linux and Windows.
+
+See merged PRs #32, #33 for the full review history.
+
 ## 0.0.8
 
 Finishes the two `v1.1`-deferred items that were tractable: concurrent
