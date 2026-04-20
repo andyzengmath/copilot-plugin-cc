@@ -84,7 +84,7 @@ function validateReviewFinding(finding, index, errors) {
   }
 }
 
-export function validateReviewOutput(data) {
+function validateReviewOutput(data) {
   const errors = [];
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     errors.push("Expected a top-level JSON object.");
@@ -130,22 +130,19 @@ export function validateReviewOutput(data) {
   return errors;
 }
 
-function normalizeReviewFinding(finding, index) {
-  const source = finding && typeof finding === "object" && !Array.isArray(finding) ? finding : {};
-  const lineStart = Number.isInteger(source.line_start) && source.line_start > 0 ? source.line_start : null;
-  const lineEnd =
-    Number.isInteger(source.line_end) && source.line_end > 0 && (!lineStart || source.line_end >= lineStart)
-      ? source.line_end
-      : lineStart;
-
+function normalizeReviewFinding(finding) {
+  // validateReviewOutput has already guaranteed: severity is an enum
+  // string, title / body / file are non-empty strings, line_start and
+  // line_end are integers >= 1, confidence is a number in [0, 1], and
+  // recommendation is a string. Only trimming remains.
   return {
-    severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
-    title: typeof source.title === "string" && source.title.trim() ? source.title.trim() : `Finding ${index + 1}`,
-    body: typeof source.body === "string" && source.body.trim() ? source.body.trim() : "No details provided.",
-    file: typeof source.file === "string" && source.file.trim() ? source.file.trim() : "unknown",
-    line_start: lineStart,
-    line_end: lineEnd,
-    recommendation: typeof source.recommendation === "string" ? source.recommendation.trim() : ""
+    severity: finding.severity,
+    title: finding.title.trim(),
+    body: finding.body.trim(),
+    file: finding.file.trim(),
+    line_start: finding.line_start,
+    line_end: finding.line_end,
+    recommendation: finding.recommendation.trim()
   };
 }
 
@@ -153,7 +150,7 @@ function normalizeReviewResultData(data) {
   return {
     verdict: data.verdict.trim(),
     summary: data.summary.trim(),
-    findings: data.findings.map((finding, index) => normalizeReviewFinding(finding, index)),
+    findings: data.findings.map(normalizeReviewFinding),
     next_steps: data.next_steps
       .filter((step) => typeof step === "string" && step.trim())
       .map((step) => step.trim())
