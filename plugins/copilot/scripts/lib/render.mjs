@@ -21,23 +21,113 @@ function formatLineRange(finding) {
   return `:${finding.line_start}-${finding.line_end}`;
 }
 
-function validateReviewResultShape(data) {
+const REVIEW_VERDICT_ENUM = ["approve", "needs-attention"];
+const REVIEW_SEVERITY_ENUM = ["critical", "high", "medium", "low"];
+const REVIEW_TOP_KEYS = new Set(["verdict", "summary", "findings", "next_steps"]);
+const REVIEW_FINDING_KEYS = new Set([
+  "severity",
+  "title",
+  "body",
+  "file",
+  "line_start",
+  "line_end",
+  "confidence",
+  "recommendation"
+]);
+
+function validateReviewFinding(finding, index, errors) {
+  const prefix = `findings[${index}]`;
+  if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
+    errors.push(`${prefix} must be a JSON object.`);
+    return;
+  }
+
+  for (const key of Object.keys(finding)) {
+    if (!REVIEW_FINDING_KEYS.has(key)) {
+      errors.push(`${prefix}: unexpected property \`${key}\`.`);
+    }
+  }
+
+  if (typeof finding.severity !== "string") {
+    errors.push(`${prefix}.severity must be a string.`);
+  } else if (!REVIEW_SEVERITY_ENUM.includes(finding.severity)) {
+    errors.push(
+      `${prefix}.severity: ${JSON.stringify(finding.severity)} not in {${REVIEW_SEVERITY_ENUM.join(", ")}}.`
+    );
+  }
+
+  for (const field of ["title", "body", "file"]) {
+    const value = finding[field];
+    if (typeof value !== "string" || value.length === 0) {
+      errors.push(`${prefix}.${field} must be a non-empty string.`);
+    }
+  }
+
+  for (const field of ["line_start", "line_end"]) {
+    const value = finding[field];
+    if (!Number.isInteger(value) || value < 1) {
+      errors.push(`${prefix}.${field} must be an integer >= 1.`);
+    }
+  }
+
+  if (
+    typeof finding.confidence !== "number" ||
+    Number.isNaN(finding.confidence) ||
+    finding.confidence < 0 ||
+    finding.confidence > 1
+  ) {
+    errors.push(`${prefix}.confidence must be a number in [0, 1].`);
+  }
+
+  if (typeof finding.recommendation !== "string") {
+    errors.push(`${prefix}.recommendation must be a string.`);
+  }
+}
+
+export function validateReviewOutput(data) {
+  const errors = [];
   if (!data || typeof data !== "object" || Array.isArray(data)) {
-    return "Expected a top-level JSON object.";
+    errors.push("Expected a top-level JSON object.");
+    return errors;
   }
-  if (typeof data.verdict !== "string" || !data.verdict.trim()) {
-    return "Missing string `verdict`.";
+
+  for (const key of Object.keys(data)) {
+    if (!REVIEW_TOP_KEYS.has(key)) {
+      errors.push(`Unexpected top-level property: \`${key}\`.`);
+    }
   }
-  if (typeof data.summary !== "string" || !data.summary.trim()) {
-    return "Missing string `summary`.";
+
+  if (typeof data.verdict !== "string") {
+    errors.push("Missing string `verdict`.");
+  } else if (!REVIEW_VERDICT_ENUM.includes(data.verdict)) {
+    errors.push(
+      `Invalid \`verdict\`: ${JSON.stringify(data.verdict)} not in {${REVIEW_VERDICT_ENUM.join(", ")}}.`
+    );
   }
+
+  if (typeof data.summary !== "string" || data.summary.length === 0) {
+    errors.push("Missing non-empty string `summary`.");
+  }
+
   if (!Array.isArray(data.findings)) {
-    return "Missing array `findings`.";
+    errors.push("Missing array `findings`.");
+  } else {
+    data.findings.forEach((finding, index) => {
+      validateReviewFinding(finding, index, errors);
+    });
   }
+
   if (!Array.isArray(data.next_steps)) {
-    return "Missing array `next_steps`.";
+    errors.push("Missing array `next_steps`.");
+  } else {
+    data.next_steps.forEach((step, index) => {
+      if (typeof step !== "string" || step.trim().length === 0) {
+        errors.push(`next_steps[${index}] must be a non-empty string.`);
+      }
+    });
   }
-  return null;
+
+  return errors;
 }
 
 function normalizeReviewFinding(finding, index) {
@@ -240,16 +330,19 @@ export function renderReviewResult(parsedResult, meta) {
     return `${lines.join("\n").trimEnd()}\n`;
   }
 
-  const validationError = validateReviewResultShape(parsedResult.parsed);
-  if (validationError) {
+  const validationErrors = validateReviewOutput(parsedResult.parsed);
+  if (validationErrors.length > 0) {
     const lines = [
       `# Copilot ${meta.reviewLabel}`,
       "",
       `Target: ${meta.targetLabel}`,
       "Copilot returned JSON with an unexpected review shape.",
       "",
-      `- Validation error: ${validationError}`
+      "Schema violations:"
     ];
+    for (const violation of validationErrors) {
+      lines.push(`- ${violation}`);
+    }
 
     if (parsedResult.rawOutput) {
       lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
