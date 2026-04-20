@@ -427,6 +427,102 @@ export async function getCopilotAuthStatus(cwd, options = {}) {
  * @param {string} cwd
  * @param {{ threadId?: string|null, turnId?: string|null, env?: NodeJS.ProcessEnv }} [options]
  */
+/**
+ * Probe whether each Copilot model is available on the current account.
+ * Spawns `copilot -p "ping" --model <model>` for each candidate in
+ * parallel and classifies the result via `isModelUnavailableStderr`:
+ *
+ *   - exit 0                    → { available: true,  detail: "ok" }
+ *   - non-zero + stderr matches → { available: false, detail: <first stderr line> }
+ *   - non-zero + no match       → { available: false, unknown: true, detail: "exit N: ..." }
+ *   - spawn error / timeout     → { available: false, unknown: true, detail: "..." }
+ *
+ * Used by `/copilot:setup --probe-models` so users see their
+ * `--effort` tier upfront rather than discovering unavailability at
+ * task time via the fallback-chain stderr notices.
+ */
+export async function probeModelAvailability(cwd, options = {}) {
+  const env = options.env ?? process.env;
+  const models = Array.isArray(options.models) ? options.models : [];
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
+  if (models.length === 0) return [];
+  return Promise.all(
+    models.map((model) => probeSingleModel(cwd, model, { env, timeoutMs }))
+  );
+}
+
+function probeSingleModel(cwd, model, { env, timeoutMs }) {
+  const [bin, ...preArgs] = resolveCopilotCommand(env);
+  const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
+  const shell =
+    useCustomCommand || process.platform !== "win32" ? false : env.SHELL || true;
+  const args = [
+    ...preArgs,
+    "-p",
+    "ping",
+    "--allow-all-tools",
+    "--allow-all-paths",
+    "--add-dir",
+    cwd,
+    "--model",
+    String(model)
+  ];
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve({ model, ...result });
+    };
+    let stderrBuf = "";
+    const proc = spawn(bin, args, {
+      cwd,
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+      shell,
+      windowsHide: true
+    });
+    proc.stderr.setEncoding("utf8");
+    proc.stderr.on("data", (chunk) => {
+      stderrBuf += chunk;
+    });
+    proc.on("error", (error) => {
+      settle({
+        available: false,
+        unknown: true,
+        detail: `probe failed to spawn: ${error.message}`
+      });
+    });
+    proc.on("close", (code, signal) => {
+      const exit = code ?? (signal ? 1 : 0);
+      if (exit === 0) {
+        settle({ available: true, detail: "ok" });
+        return;
+      }
+      const firstLine = stderrBuf.trim().split(/\r?\n/)[0] || `exit ${exit}`;
+      if (isModelUnavailableStderr(stderrBuf)) {
+        settle({ available: false, detail: firstLine });
+      } else {
+        settle({ available: false, unknown: true, detail: `exit ${exit}: ${firstLine}` });
+      }
+    });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      try {
+        proc.kill();
+      } catch {
+        // best-effort
+      }
+      settle({
+        available: false,
+        unknown: true,
+        detail: `probe timed out after ${timeoutMs}ms`
+      });
+    }, timeoutMs);
+    timer.unref?.();
+  });
+}
+
 export async function interruptAppServerTurn(cwd, options = {}) {
   const { threadId, turnId, env } = options;
   if (!threadId) {
