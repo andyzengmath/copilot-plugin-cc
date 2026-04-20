@@ -469,14 +469,22 @@ test("task --background --effort high falls back to --model claude-sonnet-4.5 vi
 
   // Poll until the detached worker writes terminal state (worker runs
   // async; this integration test accepts either completed or the
-  // completed-with-fallback outcome).
+  // completed-with-fallback outcome). The worker's writeJobFile is a
+  // plain writeFileSync, so a poll that hits the file mid-write reads
+  // truncated content — tolerate partial reads by retrying rather than
+  // throwing "Unexpected end of JSON input" and failing the test on
+  // Windows where filesystem timing makes the race more frequent.
   const deadline = Date.now() + 90000;
   let job;
   while (Date.now() < deadline) {
     const jobFile = fs.readdirSync(jobsDir).find((name) => name.endsWith(".json"));
     if (jobFile) {
-      job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
-      if (job.status === "completed" || job.status === "failed") break;
+      try {
+        job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
+        if (job.status === "completed" || job.status === "failed") break;
+      } catch {
+        // Partial write; retry next poll.
+      }
     }
     // Busy-wait sparingly to keep this test bounded.
     const start = Date.now();
