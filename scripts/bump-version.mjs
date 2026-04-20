@@ -20,6 +20,12 @@ const TARGETS = [
   },
   {
     file: "package-lock.json",
+    // Repos that do not check in a lockfile (e.g. the companion plugin,
+    // which pulls Copilot CLI itself rather than shipping locked deps)
+    // would otherwise fail `bump-version` with ENOENT. Skip gracefully
+    // when the file is absent rather than forcing contributors to fall
+    // back to manual edits.
+    optional: true,
     values: [
       {
         label: "version",
@@ -156,10 +162,17 @@ function readPackageVersion(root) {
   return packageJson.version;
 }
 
+function targetExists(root, target) {
+  return fs.existsSync(path.join(root, target.file));
+}
+
 function checkVersions(root, expectedVersion) {
   const mismatches = [];
 
   for (const target of TARGETS) {
+    if (target.optional && !targetExists(root, target)) {
+      continue;
+    }
     const json = readJson(root, target.file);
     for (const value of target.values) {
       const actual = value.get(json);
@@ -176,6 +189,9 @@ function bumpVersion(root, version) {
   const changedFiles = [];
 
   for (const target of TARGETS) {
+    if (target.optional && !targetExists(root, target)) {
+      continue;
+    }
     const json = readJson(root, target.file);
     const before = JSON.stringify(json);
 

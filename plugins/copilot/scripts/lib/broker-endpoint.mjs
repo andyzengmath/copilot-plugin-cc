@@ -13,7 +13,12 @@ export function createBrokerEndpoint(sessionDir, platform = process.platform) {
     return `pipe:\\\\.\\pipe\\${pipeName}`;
   }
 
-  return `unix:${path.join(sessionDir, "broker.sock")}`;
+  // Use the POSIX joiner explicitly so the endpoint stays `unix:/tmp/...`
+  // even when `createBrokerEndpoint` is called on a Windows runner with a
+  // POSIX-style sessionDir (e.g. cross-platform tests). On a real POSIX
+  // host `path.posix.join` and `path.join` are identical, so this is a
+  // no-op on production Linux/macOS callers.
+  return `unix:${path.posix.join(sessionDir, "broker.sock")}`;
 }
 
 export function parseBrokerEndpoint(endpoint) {
