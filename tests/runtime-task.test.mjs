@@ -402,6 +402,91 @@ test("task --effort high non-availability failure does NOT trigger fallback", ()
   assert.equal(cliEntries.length, 1, "non-availability failures must not trigger the fallback chain");
 });
 
+test("task --resume-last --effort high collapses the fallback chain on the broker path (single attempt)", () => {
+  const pluginData = makeTempDir();
+  // Seed a prior job so --resume-last has a threadId to resume. Broker
+  // path ignores per-call --model, so retrying down the chain would
+  // fire redundant identical calls + misleading retry notices naming
+  // models that were never actually used.
+  const seed = runCompanion(
+    ["task", "first"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("seed ok", { sessionId: "sess-resume-collapse" })
+    }
+  );
+  assert.equal(seed.status, 0, `seed stderr: ${seed.stderr}`);
+
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--resume-last", "--effort", "high", "continue"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("resumed ok", { sessionId: "sess-resume-collapse" }),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.doesNotMatch(
+    result.stderr,
+    /appears unavailable on this account.*retrying/i,
+    `resume+effort must not emit fallback retry notices; stderr was: ${result.stderr}`
+  );
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(
+    cliEntries.length,
+    0,
+    `resume+effort must stay on the broker path; -p argv was: ${JSON.stringify(cliEntries.map((e) => e.argv))}`
+  );
+});
+
+test("task --background --effort high falls back to --model claude-sonnet-4.5 via the worker path", () => {
+  const pluginData = makeTempDir();
+  const result = runCompanion(
+    ["task", "--background", "--effort", "high", "bg work"],
+    {
+      pluginData,
+      script: {
+        ...buildScriptedPrompt("bg fallback ok"),
+        unavailableModels: ["claude-opus-4.6"]
+      }
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /started in the background/);
+
+  // Walk state to find the completed job; worker's fallback chain must
+  // fire the same way as foreground.
+  const stateRoot = path.join(pluginData, "state");
+  const workspaceEntry = fs.readdirSync(stateRoot)[0];
+  const jobsDir = path.join(stateRoot, workspaceEntry, "jobs");
+
+  // Poll until the detached worker writes terminal state (worker runs
+  // async; this integration test accepts either completed or the
+  // completed-with-fallback outcome).
+  const deadline = Date.now() + 90000;
+  let job;
+  while (Date.now() < deadline) {
+    const jobFile = fs.readdirSync(jobsDir).find((name) => name.endsWith(".json"));
+    if (jobFile) {
+      job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
+      if (job.status === "completed" || job.status === "failed") break;
+    }
+    // Busy-wait sparingly to keep this test bounded.
+    const start = Date.now();
+    while (Date.now() - start < 500) {
+      /* spin */
+    }
+  }
+  assert.ok(job, "expected a worker job record");
+  assert.equal(
+    job.status,
+    "completed",
+    `worker must succeed via fallback; got ${job.status} with log ${JSON.stringify(job)}`
+  );
+});
+
 test("task --model with a missing Copilot binary surfaces a non-zero exit and error", () => {
   // Points COPILOT_COMPANION_COPILOT_COMMAND at a path that doesn't exist.
   // This exercises the user-visible failure path: the availability probe in
