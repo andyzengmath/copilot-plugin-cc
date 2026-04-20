@@ -468,6 +468,22 @@ function ensureCopilotAvailable(cwd, options = {}) {
   }
 }
 
+// A failure from the per-call CLI looks like a model-availability problem
+// when stderr names a "model" alongside one of the well-known availability
+// signals. The pattern is intentionally conservative — it must mention
+// "model" AND one of the availability indicators — so generic non-zero
+// exits (network glitch, prompt-rejected, tool failure) do NOT trigger
+// the --effort fallback chain in copilot-companion.mjs. If a real Copilot
+// CLI release uses a phrase outside this set, the fallback simply does
+// not engage and the user sees the original error: a safe failure mode.
+const MODEL_UNAVAILABLE_RE =
+  /\bmodel\b[\s\S]{0,80}?\b(?:not\s*available|unavailable|not\s*authorized|access\s*denied|forbidden|requires?\s+(?:a\s+)?[\w-]*\s*(?:tier|plan|subscription)|access\s*required|no\s*access)\b/i;
+
+export function isModelUnavailableStderr(text) {
+  if (typeof text !== "string" || !text) return false;
+  return MODEL_UNAVAILABLE_RE.test(text);
+}
+
 // Shell/cmd.exe metacharacters. Any of these in a user-controlled argv slot
 // becomes a command-injection vector on Windows where we keep `shell:true`
 // for `.cmd` launcher resolution (CVE-2024-27980 / "BatBadBut" class). We

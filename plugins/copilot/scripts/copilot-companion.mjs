@@ -15,6 +15,7 @@ import {
     getCopilotAvailability,
     getSessionRuntimeStatus,
     interruptAppServerTurn,
+    isModelUnavailableStderr,
     parseStructuredOutput,
     runAppServerTurn
   } from "./lib/copilot.mjs";
@@ -80,9 +81,46 @@ const EFFORT_TO_MODEL = new Map([
   ["xhigh", "claude-opus-4.6"]
 ]);
 
+// When the primary effort-mapped model is not available on the user's
+// Copilot account, /copilot:task degrades down the capability tiers
+// rather than failing outright. The chain only activates for `--effort`
+// (no explicit --model). Each entry is the ordered list of fallbacks
+// AFTER the primary mapping; the runtime loop tries the primary first,
+// then walks this list. Entries lower in the chain are progressively
+// less capable but more widely available (Copilot Free / Pro / Business
+// tiers ship subsets of these models).
+const EFFORT_FALLBACK_CHAIN = new Map([
+  ["none", []],
+  ["minimal", []],
+  ["low", []],
+  ["medium", ["claude-opus-4.6-fast"]],
+  ["high", ["claude-sonnet-4.5", "claude-opus-4.6-fast"]],
+  ["xhigh", ["claude-sonnet-4.5", "claude-opus-4.6-fast"]]
+]);
+
 function applyEffortFallbackModel(model, effort) {
   if (model || !effort) return model;
   return EFFORT_TO_MODEL.get(effort) ?? null;
+}
+
+function buildEffortModelChain({ requestedModel, effort, primaryModel }) {
+  // Auto-fallback only when --effort drove the model choice. An explicit
+  // --model X is the user opting into a specific model; if it fails, we
+  // surface the error rather than silently substituting.
+  if (requestedModel || !effort || !primaryModel) {
+    return primaryModel ? [primaryModel] : [null];
+  }
+  const fallbacks = EFFORT_FALLBACK_CHAIN.get(effort) ?? [];
+  // Drop duplicates (e.g. if a fallback equals the primary) while
+  // preserving order.
+  const seen = new Set();
+  const chain = [];
+  for (const candidate of [primaryModel, ...fallbacks]) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    chain.push(candidate);
+  }
+  return chain;
 }
 const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
 
@@ -440,14 +478,40 @@ async function executeTaskRun(request) {
   // contract in the task-level instructions. Copilot CLI has no per-turn
   // sandbox knob, and we intentionally avoid restarting the broker
   // per-command to keep sessionId resume working.
-  const result = await runAppServerTurn(workspaceRoot, {
-    resumeThreadId,
-    prompt: request.prompt,
-    defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
-    model: request.model,
-    onProgress: request.onProgress,
-    threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
+  //
+  // When --effort drove the model choice (no explicit --model), build a
+  // fallback chain so a non-available top-tier model (e.g. user's
+  // Copilot account is on a tier without claude-opus-4.6) degrades to
+  // the next tier rather than failing outright. Resume forces the
+  // broker path, where per-call --model is dropped anyway, so the chain
+  // is a single-element no-op there.
+  const modelChain = buildEffortModelChain({
+    requestedModel: request.requestedModel ?? null,
+    effort: request.effort ?? null,
+    primaryModel: request.model
   });
+  let result;
+  for (let i = 0; i < modelChain.length; i += 1) {
+    const candidate = modelChain[i];
+    result = await runAppServerTurn(workspaceRoot, {
+      resumeThreadId,
+      prompt: request.prompt,
+      defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
+      model: candidate,
+      onProgress: request.onProgress,
+      threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
+    });
+    if (result.status === 0) break;
+    const hasNext = i < modelChain.length - 1;
+    if (!hasNext) break;
+    if (!isModelUnavailableStderr(result.stderr) && !isModelUnavailableStderr(result.error?.message ?? "")) {
+      break;
+    }
+    process.stderr.write(
+      `[copilot] --model ${candidate} appears unavailable on this account; ` +
+        `retrying with --model ${modelChain[i + 1]} (--effort ${request.effort} fallback chain).\n`
+    );
+  }
 
   const rawOutput = typeof result.finalMessage === "string" ? result.finalMessage : "";
   const failureMessage = result.error?.message ?? result.stderr ?? "";
@@ -557,11 +621,15 @@ function buildTaskJob(workspaceRoot, taskMetadata, write) {
   });
 }
 
-function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId }) {
+function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId, requestedModel }) {
   return {
     cwd,
     model,
     effort,
+    // Pass through the user's literal --model value so executeTaskRun can
+    // tell "user picked exactly this model" apart from "we mapped from
+    // --effort". Only the latter triggers the auto-fallback chain.
+    requestedModel: requestedModel ?? null,
     prompt,
     write,
     resumeLast,
@@ -740,6 +808,7 @@ async function handleTask(argv) {
       cwd,
       model,
       effort,
+      requestedModel,
       prompt,
       write,
       resumeLast,
@@ -758,6 +827,7 @@ async function handleTask(argv) {
         cwd,
         model,
         effort,
+        requestedModel,
         prompt,
         write,
         resumeLast,

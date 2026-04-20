@@ -264,6 +264,144 @@ test("task --resume-last with --model emits a stderr notice and stays on the bro
   );
 });
 
+test("task --effort high falls back to --model claude-sonnet-4.5 when claude-opus-4.6 is unavailable", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "high", "hi"],
+    {
+      pluginData,
+      script: {
+        ...buildScriptedPrompt("fallback ok"),
+        unavailableModels: ["claude-opus-4.6"]
+      },
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /fallback ok/);
+  assert.match(
+    result.stderr,
+    /claude-opus-4\.6.*unavailable.*retrying.*claude-sonnet-4\.5.*fallback chain/i,
+    `expected fallback notice on stderr; got: ${result.stderr}`
+  );
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(
+    cliEntries.length,
+    2,
+    `expected exactly two -p invocations; got ${cliEntries.length}: ${JSON.stringify(cliEntries.map((e) => e.argv))}`
+  );
+  const firstModel = cliEntries[0].argv[cliEntries[0].argv.indexOf("--model") + 1];
+  const secondModel = cliEntries[1].argv[cliEntries[1].argv.indexOf("--model") + 1];
+  assert.equal(firstModel, "claude-opus-4.6");
+  assert.equal(secondModel, "claude-sonnet-4.5");
+});
+
+test("task --effort high exhausts the fallback chain when every tier is unavailable", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "high", "hi"],
+    {
+      pluginData,
+      script: {
+        ...buildScriptedPrompt("never seen"),
+        unavailableModels: [
+          "claude-opus-4.6",
+          "claude-sonnet-4.5",
+          "claude-opus-4.6-fast"
+        ]
+      },
+      spawnLog
+    }
+  );
+  assert.notEqual(result.status, 0);
+  // Two retry notices, then the final unavailable error from the
+  // tail-of-chain spawn surfaces in the rendered failure path.
+  const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
+  assert.equal(
+    noticeMatches.length,
+    2,
+    `expected two retry notices (high → sonnet → fast); got ${noticeMatches.length}`
+  );
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 3, "expected three -p invocations across the full chain");
+});
+
+test("task --effort high with explicit --model opus does NOT auto-fallback", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "high", "--model", "opus", "hi"],
+    {
+      pluginData,
+      script: {
+        ...buildScriptedPrompt("never seen"),
+        unavailableModels: ["claude-opus-4.6"]
+      },
+      spawnLog
+    }
+  );
+  // --model wins over --effort (the existing stderr notice still fires);
+  // because the user picked opus explicitly, no fallback happens.
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(
+    result.stderr,
+    /appears unavailable on this account.*retrying/i,
+    `explicit --model must not trigger fallback; stderr was: ${result.stderr}`
+  );
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 1, "explicit --model should produce exactly one spawn attempt");
+});
+
+test("task --effort high with the primary model available does not retry", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "high", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("primary ok"),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /primary ok/);
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 1, "no fallback expected when the primary model succeeds");
+});
+
+test("task --effort high non-availability failure does NOT trigger fallback", () => {
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "high", "hi"],
+    {
+      pluginData,
+      // stopReason != "end_turn" makes fake-copilot exit 1 without writing
+      // a model-availability stderr — the kind of failure we should NOT
+      // retry on.
+      script: buildScriptedPrompt("partial", {
+        sessionId: "sess-non-avail-fail",
+        stopReason: "cancelled"
+      }),
+      spawnLog
+    }
+  );
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(
+    result.stderr,
+    /appears unavailable on this account.*retrying/i
+  );
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 1, "non-availability failures must not trigger the fallback chain");
+});
+
 test("task --model with a missing Copilot binary surfaces a non-zero exit and error", () => {
   // Points COPILOT_COMPANION_COPILOT_COMMAND at a path that doesn't exist.
   // This exercises the user-visible failure path: the availability probe in
