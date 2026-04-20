@@ -194,6 +194,15 @@ export function renderSetupReport(report) {
     ""
   ];
 
+  if (Array.isArray(report.modelProbe) && report.modelProbe.length > 0) {
+    lines.push("Model availability (--probe-models):");
+    for (const entry of report.modelProbe) {
+      const marker = entry.available ? "ok" : entry.unknown ? "unknown" : "unavailable";
+      lines.push(`- ${entry.model}: ${marker} — ${entry.detail}`);
+    }
+    lines.push("");
+  }
+
   if (report.actionsTaken.length > 0) {
     lines.push("Actions taken:");
     for (const action of report.actionsTaken) {

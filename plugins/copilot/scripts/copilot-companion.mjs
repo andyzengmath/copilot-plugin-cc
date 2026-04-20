@@ -17,6 +17,7 @@ import {
     interruptAppServerTurn,
     isModelUnavailableStderr,
     parseStructuredOutput,
+    probeModelAvailability,
     runAppServerTurn
   } from "./lib/copilot.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
@@ -230,7 +231,7 @@ function firstMeaningfulLine(text, fallback) {
   return line ?? fallback;
 }
 
-async function buildSetupReport(cwd, actionsTaken = []) {
+async function buildSetupReport(cwd, actionsTaken = [], options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const nodeStatus = binaryAvailable("node", ["--version"], { cwd });
   const npmStatus = binaryAvailable("npm", ["--version"], { cwd });
@@ -250,6 +251,24 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     nextSteps.push("Optional: run `/copilot:setup --enable-review-gate` to require a fresh review before stop.");
   }
 
+  // --probe-models runs `copilot -p "ping" --model <m>` against each
+  // distinct model in EFFORT_TO_MODEL and reports availability per
+  // account. Skipped by default to keep the default setup fast (each
+  // probe is a full subprocess round-trip).
+  let modelProbe = null;
+  if (options.probeModels && copilotStatus.available) {
+    const models = [...new Set(EFFORT_TO_MODEL.values())];
+    modelProbe = await probeModelAvailability(cwd, { models });
+    const unavailable = modelProbe.filter((r) => !r.available && !r.unknown);
+    if (unavailable.length > 0) {
+      nextSteps.push(
+        `Some --effort tiers are unavailable on this account: ${unavailable
+          .map((r) => r.model)
+          .join(", ")}. /copilot:task will auto-fall-back; or pick --effort low / medium explicitly.`
+      );
+    }
+  }
+
   return {
     ready: nodeStatus.available && copilotStatus.available && authStatus.loggedIn,
     node: nodeStatus,
@@ -259,14 +278,20 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
     actionsTaken,
-    nextSteps
+    nextSteps,
+    modelProbe
   };
 }
 
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
-    booleanOptions: ["json", "enable-review-gate", "disable-review-gate"]
+    booleanOptions: [
+      "json",
+      "enable-review-gate",
+      "disable-review-gate",
+      "probe-models"
+    ]
   });
 
   if (options["enable-review-gate"] && options["disable-review-gate"]) {
@@ -285,7 +310,9 @@ async function handleSetup(argv) {
     actionsTaken.push(`Disabled the stop-time review gate for ${workspaceRoot}.`);
   }
 
-  const finalReport = await buildSetupReport(cwd, actionsTaken);
+  const finalReport = await buildSetupReport(cwd, actionsTaken, {
+    probeModels: Boolean(options["probe-models"])
+  });
   outputResult(options.json ? finalReport : renderSetupReport(finalReport), options.json);
 }
 
