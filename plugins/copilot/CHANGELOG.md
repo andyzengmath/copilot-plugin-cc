@@ -5,6 +5,60 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.12
+
+Refreshes the user-facing model aliases to track Copilot's
+current top-of-family models after the v0.0.9 upstream audit
+surfaced newer IDs that `--help` still lagged behind. User-
+facing shortcuts only — `--effort` defaults are deliberately
+unchanged to avoid silent quota-cost changes.
+
+Changed:
+- MODEL_ALIASES (PR #43):
+  - `opus`    → `claude-opus-4.7`   (was `claude-opus-4.6`)
+  - `sonnet`  → `claude-sonnet-4.6` (was `claude-sonnet-4.5`)
+  - `gpt`     → `gpt-5.4`           (was `gpt-5.2`)
+  - `codex`   → `gpt-5.3-codex`     (was `gpt-5.2-codex`)
+  - `fast` / `haiku` unchanged (no newer variant shipped yet).
+  - Verified against the official [supported-models
+    doc](https://docs.github.com/en/copilot/reference/ai-models/supported-models);
+    local `copilot --help` lags the catalog.
+- README (PR #43): aliases line reshuffled + new block-quote
+  documenting the 7.5x premium-request multiplier on
+  `claude-opus-4.7` (promotional, through 2026-04-30) and how
+  to opt back to `claude-opus-4.6` explicitly.
+
+Explicitly NOT changed:
+- `EFFORT_TO_MODEL` stays on `claude-opus-4.6` for
+  `high`/`xhigh` and `claude-sonnet-4.5` for `medium`. Silently
+  shifting `--effort high` from 4.6 to 4.7 would 7.5x users'
+  quota burn on automated flows. The alias refresh only kicks
+  in when a user explicitly types `--model opus`.
+- `EFFORT_FALLBACK_CHAIN` stays on the existing tier names.
+
+Limitations:
+- `claude-opus-4.7` on Copilot is capped at ~192K context (the
+  full 1M window the Anthropic API supports is not exposed by
+  Copilot — see [upstream issue
+  #2785](https://github.com/github/copilot-cli/issues/2785)).
+  Users needing full 1M have to use Claude Code or the
+  Anthropic API directly. No plugin-side workaround.
+
+Added:
+- `tests/runtime-task.test.mjs`: `task --model opus resolves
+  the alias to --model claude-opus-4.7 via -p` (+1 case).
+- Existing codex-alias test updated to `gpt-5.3-codex` as the
+  refresh regression guard.
+- Two opus-alias-resolution tests in runtime-task and
+  runtime-review updated: fake-copilot `unavailableModels`
+  now lists `claude-opus-4.7` so `--model opus`'s
+  non-auto-fallback assertion still holds.
+
+Test suite: 152 → 153 tests (+1 opus alias). 152 pass, 1
+skipped, 0 fail. CI green on both Linux and Windows.
+
+See merged PR #43 for the full review history.
+
 ## 0.0.11
 
 Small follow-up cycle to v0.0.10 acting on the remaining open-ended
