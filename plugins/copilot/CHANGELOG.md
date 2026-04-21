@@ -5,6 +5,44 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.13
+
+Small cleanup release. Two low-risk items that had drifted since
+v0.0.8 (SECURITY.md) and v0.0.11 (SKILL.md alias list).
+
+Changed:
+- `EFFORT_TO_MODEL` (PR #47): `medium` → `claude-sonnet-4.6` (was
+  `claude-sonnet-4.5`). Same Anthropic billing tier, no
+  cost/quota impact on `--effort medium` flows. `EFFORT_FALLBACK_CHAIN`
+  first-fallback entry for `high` / `xhigh` bumped to
+  `claude-sonnet-4.6` to stay consistent with the primary.
+- **Unchanged** — `--effort high` / `xhigh` stays on
+  `claude-opus-4.6`. The v0.0.12 `opus` alias bumped to 4.7 for
+  users who explicitly type `--model opus`, but the effort-default
+  intentionally holds on 4.6 to avoid the 7.5x opus-4.7 premium-
+  request multiplier (through 2026-04-30) silently hitting
+  automation.
+- `plugins/copilot/agents/copilot-rescue.md` and
+  `plugins/copilot/skills/copilot-cli-runtime/SKILL.md` had stale
+  alias lists (still showed `opus` → 4.6, `sonnet` → 4.5, didn't
+  list the v0.0.11 `gpt` / `codex` aliases). Refreshed to the
+  v0.0.12 state + the v0.0.13 sonnet default.
+- `SECURITY.md` (PR #46): threat model refresh for everything
+  shipped since v0.0.3/4. Adds two bullets to "What the plugin IS
+  designed to defend against" — concurrent-session broker hijack
+  (v0.0.8 `broker.lock` + stale-PID recovery) and silent acceptance
+  of malformed structured review output (v0.0.8/9 schema
+  validator). Adds `broker.lock` to the Secrets and paths table.
+  Expands "Known limits" to explicitly list per-ACP-session
+  sandboxing and Windows review-path `--effort` as upstream-
+  blocked rather than plugin-side plans.
+
+Test suite: 153 tests, unchanged count (the sonnet bump is a
+surgical rename, not new coverage). 152 pass, 1 skipped, 0 fail.
+CI green on both Linux and Windows.
+
+See merged PRs #46, #47 for the full review history.
+
 ## 0.0.12
 
 Refreshes the user-facing model aliases to track Copilot's
