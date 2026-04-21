@@ -5,6 +5,50 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.11
+
+Small follow-up cycle to v0.0.10 acting on the remaining open-ended
+items from the post-v0.0.10 backlog. One user-facing UX addition
+(GPT-family model aliases) plus one long-standing Windows test
+flake root-caused and fixed.
+
+Added:
+- `gpt` → `gpt-5.2` and `codex` → `gpt-5.2-codex` MODEL_ALIASES
+  entries (PR #40). Acts on the v0.0.9 upstream audit finding that
+  multiple GPT models became visible in `copilot --help`
+  (gpt-5.2, gpt-5.2-codex, gpt-5.1-codex-max, gpt-5-mini, etc.) but
+  were only reachable via full identifier. Strictly additive — any
+  concrete model name still passes through verbatim. The comment
+  above MODEL_ALIASES now documents the refresh convention (update
+  when Copilot advances a family's top model; older names keep
+  working via pass-through without an alias entry).
+- `tests/runtime-task.test.mjs`: `task --model codex resolves the
+  alias to --model gpt-5.2-codex via -p` (+1 case).
+- `README.md`: model-alias line updated to show all six aliases and
+  an explicit mention that concrete model names work without an
+  alias.
+
+Fixed:
+- `tests/runtime-task.test.mjs`'s `task --background --effort high
+  falls back to --model claude-sonnet-4.5 via the worker path` no
+  longer flakes under full-suite parallel load on Windows (PR #41).
+  Root cause: a synchronous busy-spin in the polling loop between
+  file-system reads starved the detached worker subprocess of CPU,
+  pushing the job past the 90 s deadline on loaded Windows. The
+  test now uses `await new Promise((resolve) => setTimeout(resolve,
+  500))` between polls (releasing the event loop) and the deadline
+  has been bumped to 180 s. Isolated run completes in ~125 s
+  post-fix. The root-cause analysis is recorded in an expanded
+  comment above the polling loop so a future reader doesn't
+  reintroduce a busy-spin.
+
+Test suite: 151 → 152 tests (+1 codex alias). 151 pass, 1 skipped,
+0 fail. CI green on both Linux and Windows; the previously-flaky
+\-\-background test now passes deterministically under parallel
+load.
+
+See merged PRs #40, #41 for the full review history.
+
 ## 0.0.10
 
 Extends the `--effort` fallback chain with `claude-haiku-4.5` as the
