@@ -1,8 +1,8 @@
 # copilot-plugin-cc — post-v0.0.8 handoff notes
 
 **Date:** 2026-04-20
-**Last shipped tag:** `v0.0.9` (was `v0.0.8` when this doc was first written — see [v0.0.9 update](#v009-update) at the bottom).
-**Main state:** 148 tests / 147 pass / 1 skipped / 0 fail on both `ubuntu-latest` and `windows-latest` CI.
+**Last shipped tag:** `v0.0.10` (was `v0.0.8` when this doc was first written — see [v0.0.9 update](#v009-update) and [v0.0.10 update](#v0010-update) at the bottom).
+**Main state:** 151 tests / 150 pass / 1 skipped / 0 fail on both `ubuntu-latest` and `windows-latest` CI.
 
 Follow-on to [`2026-04-20-v08-handoff.md`](./2026-04-20-v08-handoff.md). Re-read that file for the full v0.0.1 → v0.0.7 history, conventions, release process, and fixture/test patterns — it's all still accurate. This file only captures what changed in the v0.0.8 cycle and the current backlog.
 
@@ -122,3 +122,37 @@ Ran `copilot --help` against a real install (npm-global `C:\ProgramData\global-n
   - `EFFORT_TO_MODEL` tuning if the new model IDs (above) become preferred defaults.
 
 Nothing is urgent. A clean stopping point.
+
+---
+
+## v0.0.10 update
+
+**Date:** 2026-04-21
+**Tag:** [`v0.0.10`](https://github.com/andyzengmath/copilot-plugin-cc/releases/tag/v0.0.10)
+
+### Shipped
+
+| PR  | Theme                                                                                                         |
+| --- | ------------------------------------------------------------------------------------------------------------- |
+| #36 | v0.10 (1/N) Append `claude-haiku-4.5` as the tail of the `medium` and `high` / `xhigh` fallback chains; expand `--probe-models` to cover the union of primaries + fallback chain entries. +3 tests (medium-fallback, medium-exhaustion, probe-nextSteps guard). README refresh (fallback table + status + deferred-items retirement). |
+| #37 | Release bump to v0.0.10.                                                                                      |
+
+This is the first of the "open-ended" backlog items to land — it acts on the `copilot --help` findings recorded in the v0.0.9 update by wiring one of the newly-visible model IDs into the fallback chain. Strictly-additive: users on tiers where earlier fallbacks are available are unaffected; users who previously hit chain exhaustion on a busy Copilot account now get one more graceful tier before the call fails.
+
+### Review gates exercised on #36
+
+Both code-review skills ran and concurred:
+
+- `/code-review:code-review` — eligibility passed, 5 parallel Sonnet reviewers reported clean (no findings ≥ 80 threshold).
+- `/soliton:pr-review` — risk 31/100 (MEDIUM); 4 specialty agents produced 5 improvement-tier findings at confidence 82–90. All five addressed in the fixup commit `58df6b0` (docs-only README refresh + 3 new test cases).
+
+The `task --background --effort high falls back` test remains a pre-existing Windows flake under high parallel load (previously noted on PR #28 / PR #29 cycles). Passes in isolation in ~26 s. Not caused by any change in this cycle.
+
+### Current backlog (after v0.0.10)
+
+- **Upstream-blocked** — unchanged from v0.0.9 update. Per-session sandboxing + Windows review-path stdin both still waiting on Copilot CLI.
+- **Open-ended:**
+  - Further `EFFORT_TO_MODEL` / chain tuning. The v0.0.9 audit surfaced additional new models (`gpt-5.2-codex`, `claude-opus-4.5`, `gpt-5.1-codex-max`, `claude-haiku-4.5`, `gpt-5.1-codex-mini`, `gpt-5-mini`) and we only wired one of them (`claude-haiku-4.5`) into the chain so far. The rest "just work" via pass-through `--model` but no default uses them.
+  - Feature work outside the v1.1 backlog. No specific item queued.
+
+Nothing is urgent.
