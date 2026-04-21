@@ -315,24 +315,26 @@ test("task --effort high exhausts the fallback chain when every tier is unavaila
         unavailableModels: [
           "claude-opus-4.6",
           "claude-sonnet-4.5",
-          "claude-opus-4.6-fast"
+          "claude-opus-4.6-fast",
+          "claude-haiku-4.5"
         ]
       },
       spawnLog
     }
   );
   assert.notEqual(result.status, 0);
-  // Two retry notices, then the final unavailable error from the
-  // tail-of-chain spawn surfaces in the rendered failure path.
+  // Three retry notices as the chain walks opus-4.6 → sonnet-4.5 →
+  // opus-4.6-fast → haiku-4.5 and the tail-of-chain spawn surfaces
+  // the final unavailable error through the rendered failure path.
   const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
   assert.equal(
     noticeMatches.length,
-    2,
-    `expected two retry notices (high → sonnet → fast); got ${noticeMatches.length}`
+    3,
+    `expected three retry notices (high → sonnet → fast → haiku); got ${noticeMatches.length}`
   );
   const entries = readSpawnLog(spawnLog);
   const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
-  assert.equal(cliEntries.length, 3, "expected three -p invocations across the full chain");
+  assert.equal(cliEntries.length, 4, "expected four -p invocations across the full chain");
 });
 
 test("task --effort high with explicit --model opus does NOT auto-fallback", () => {
