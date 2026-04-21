@@ -37,11 +37,12 @@ security fixes. Older tags are not backported.
   invoked with `--model` or `--effort`, the plugin bypasses the broker
   and spawns `copilot -p "<prompt>" --model <model>` as a one-shot
   subprocess. With `--effort` (no explicit `--model`) the plugin may
-  spawn up to three such subprocesses in sequence as it walks the
+  spawn up to four such subprocesses in sequence as it walks the
   model-availability fallback chain in
-  [`plugins/copilot/scripts/copilot-companion.mjs`](./plugins/copilot/scripts/copilot-companion.mjs);
-  the per-spawn attack surface described here is identical on every
-  iteration. On Windows the real Copilot CLI ships as a `.cmd`
+  [`plugins/copilot/scripts/copilot-companion.mjs`](./plugins/copilot/scripts/copilot-companion.mjs)
+  (as of v0.0.10 the `high` / `xhigh` tier runs opus-4.6 → sonnet-4.5
+  → opus-4.6-fast → haiku-4.5); the per-spawn attack surface described
+  here is identical on every iteration. On Windows the real Copilot CLI ships as a `.cmd`
   launcher, so Node's `spawn()` has to use `shell: true` for PATH /
   PATHEXT resolution — which opens a CVE-2024-27980 ("BatBadBut") class
   injection surface. The plugin closes this by validating `prompt`,
@@ -58,6 +59,31 @@ security fixes. Older tags are not backported.
   guard is active. Matches are rejected with a clear error; the caller
   can reword, or drop `--model`/`--effort` to route through the broker
   instead, where prompts travel over JSON-RPC and never see a shell.
+
+- **Concurrent-session broker hijack.** Two Claude sessions starting on
+  the same workspace simultaneously could previously race to each spawn
+  their own detached `copilot --acp` broker, and the loser's orphaned
+  broker would stay alive under the same user account with no reference
+  from `broker.json`. Since v0.0.8 a workspace-scoped `broker.lock`
+  (atomic `O_CREAT|O_EXCL` create, `0600`, holds the lock-owner's
+  `<pid>\n<timestamp>\n` only — no secrets) serializes the read-decide-
+  spawn critical section. Stale-lock recovery uses
+  `process.kill(holderPid, 0)`: `ESRCH` steals the lock; `EPERM` is
+  treated as alive (the lock owner is another user's live process and
+  we leave them alone). See
+  [`plugins/copilot/scripts/lib/broker-lifecycle.mjs`](./plugins/copilot/scripts/lib/broker-lifecycle.mjs).
+- **Silent acceptance of malformed structured review output.** Since
+  v0.0.8 (tightened in v0.0.9) `/copilot:review` and
+  `/copilot:adversarial-review` validate Copilot's JSON response against
+  the full schema at
+  [`plugins/copilot/schemas/review-output.schema.json`](./plugins/copilot/schemas/review-output.schema.json)
+  before rendering. Violations render as a bulleted `Schema violations:`
+  section naming every breach, rather than being silently normalized
+  with default placeholders (old pre-v0.0.8 behavior let a malformed
+  finding render cleanly with `severity: "low"`, `file: "unknown"`,
+  etc., masking the real output bug). This reduces prompt-injection
+  surface where the model was coerced into emitting structured-looking
+  but meaningless output.
 
 ### What the plugin does *not* defend against
 
@@ -101,6 +127,7 @@ security fixes. Older tags are not backported.
 | Artifact                         | Location                                                         | Notes                                                                                                     |
 | -------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | Broker shared secret             | `<CLAUDE_PLUGIN_DATA>/state/<workspace>/broker.json` (`secret`)  | 256-bit random hex; rotated per broker. Mode `0600` on POSIX; Windows ACLs only.                          |
+| Broker spawn lock                | `<CLAUDE_PLUGIN_DATA>/state/<workspace>/broker.lock`             | Per-workspace mutex for concurrent-session broker reuse (since v0.0.8). Mode `0600`. Holds `<pid>\n<timestamp>\n` only — no secrets. Unlinked when the owner exits the critical section. |
 | Broker socket / named pipe       | `<os.tmpdir()>/cpc-XXXXXX/broker.sock` (Unix) or `\\.\pipe\cpc-…` (Windows) | Unix socket inherits the mkdtemp directory's `0700`. Named pipes are user-scoped.                          |
 | Broker PID / log                 | Alongside the socket in the session dir                          | Cleaned up via `teardownBrokerSession`.                                                                   |
 | Per-workspace job records        | `<CLAUDE_PLUGIN_DATA>/state/<workspace>/jobs/*.json`             | Contains prompt text, threadId, final message excerpts. Treat as you would a local work log.              |
@@ -121,9 +148,24 @@ security fixes. Older tags are not backported.
 
 ## Known limits we plan to revisit
 
-- No native Windows ACL enforcement for `broker.json`. A future change
-  can call `icacls` or the Win32 security API to match the POSIX
-  `0600` intent.
+- No native Windows ACL enforcement for `broker.json` / `broker.lock`.
+  A future change can call `icacls` or the Win32 security API to match
+  the POSIX `0600` intent.
 - The per-call CLI path spawns with `--allow-all-tools --allow-all-paths`
   unconditionally. Scoping those to `options.write` would require
   Copilot CLI to support non-interactive tool approval in `-p` mode.
+- **Per-ACP-session sandboxing** (the v1.1 design-doc item 3):
+  `copilot --acp` does not expose a per-session permission surface, so
+  all ACP sessions inside a broker share the broker-level
+  `--allow-all-tools --allow-all-paths --allow-all-urls` set. Tracked
+  upstream; blocked on Copilot CLI exposing per-session flags via the
+  ACP `session/new` surface.
+- **Review-path `--effort` on Windows production** currently routes
+  through `shell: true` with the real `.cmd` launcher, which means
+  review prompts containing XML tags are rejected by the shell-metachar
+  deny-list (safe-by-default). A `shell: false` path requires Copilot
+  CLI to accept a prompt via stdin or `--prompt-file` so XML content
+  stays out of argv; tracked in
+  [docs/plans/2026-04-20-v08-handoff.md](./docs/plans/2026-04-20-v08-handoff.md).
+  Users on Windows prod can route review without `--effort` through the
+  broker (where prompts travel over JSON-RPC and never reach a shell).
