@@ -110,9 +110,10 @@ function readSpawnLog(spawnLogPath) {
     .map((line) => JSON.parse(line));
 }
 
-test("task --model codex resolves the alias to --model gpt-5.2-codex via -p", () => {
-  // Locks in the v0.10 addition of the `codex` alias so a refactor
-  // of MODEL_ALIASES doesn't silently drop GPT-family shortcuts.
+test("task --model codex resolves the alias to --model gpt-5.3-codex via -p", () => {
+  // Locks in the v0.10 addition of the `codex` alias + v0.11 refresh
+  // of the target model so MODEL_ALIASES edits don't silently drop
+  // GPT-family shortcuts or stale-out.
   const pluginData = makeTempDir();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
   const result = runCompanion(
@@ -130,8 +131,35 @@ test("task --model codex resolves the alias to --model gpt-5.2-codex via -p", ()
   const modelIdx = cli.argv.indexOf("--model");
   assert.equal(
     cli.argv[modelIdx + 1],
-    "gpt-5.2-codex",
-    `expected --model gpt-5.2-codex after alias resolution; got ${JSON.stringify(cli.argv)}`
+    "gpt-5.3-codex",
+    `expected --model gpt-5.3-codex after alias resolution; got ${JSON.stringify(cli.argv)}`
+  );
+});
+
+test("task --model opus resolves the alias to --model claude-opus-4.7 via -p", () => {
+  // Locks in the v0.11 refresh of `opus` to track the new top-of-
+  // family model (claude-opus-4.7). Tests for the Claude-family
+  // shortcut so a future refresh (e.g. 4.8) can't silently stale the
+  // alias without a test update.
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--model", "opus", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("opus ok"),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /opus ok/);
+  const cli = readSpawnLog(spawnLog).find((entry) => entry.argv.includes("-p"));
+  assert.ok(cli, "expected a -p invocation");
+  const modelIdx = cli.argv.indexOf("--model");
+  assert.equal(
+    cli.argv[modelIdx + 1],
+    "claude-opus-4.7",
+    `expected --model claude-opus-4.7 after alias resolution; got ${JSON.stringify(cli.argv)}`
   );
 });
 
@@ -444,7 +472,9 @@ test("task --effort high with explicit --model opus does NOT auto-fallback", () 
       pluginData,
       script: {
         ...buildScriptedPrompt("never seen"),
-        unavailableModels: ["claude-opus-4.6"]
+        // v0.11 refresh: `opus` alias now resolves to claude-opus-4.7,
+        // so the fixture must unavailable-list the resolved target.
+        unavailableModels: ["claude-opus-4.7"]
       },
       spawnLog
     }

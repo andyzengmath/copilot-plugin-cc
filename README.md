@@ -117,11 +117,19 @@ Flags: `--background`, `--wait`, `--resume`, `--fresh`, `--model <name>`, `--eff
 ```
 
 **Model aliases**: `fast` → `claude-opus-4.6-fast`, `opus` →
-`claude-opus-4.6`, `sonnet` → `claude-sonnet-4.5`, `haiku` →
-`claude-haiku-4.5`, `gpt` → `gpt-5.2`, `codex` → `gpt-5.2-codex`.
+`claude-opus-4.7`, `sonnet` → `claude-sonnet-4.6`, `haiku` →
+`claude-haiku-4.5`, `gpt` → `gpt-5.4`, `codex` → `gpt-5.3-codex`.
 Any concrete Copilot model name works too — e.g.
-`--model claude-opus-4.5` or `--model gpt-5.1-codex-max` — even if
-it doesn't have a short alias.
+`--model claude-opus-4.6` or `--model gpt-5.1-codex-max` or
+`--model gpt-5.4-mini` — even if it doesn't have a short alias.
+
+> Note: `claude-opus-4.7` currently sits at a 7.5x Copilot premium-
+> request multiplier (through 2026-04-30). The `opus` alias tracks
+> it anyway; type `--model claude-opus-4.6` explicitly if you need
+> the pre-4.7 billing rate. The `--effort high` default (below)
+> intentionally stays on `claude-opus-4.6` so automated flows that
+> use `--effort` don't change their per-call cost without an
+> explicit user decision.
 
 **Effort → model mapping**: Copilot CLI has no per-call reasoning knob, so
 `--effort` is translated:

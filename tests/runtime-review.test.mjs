@@ -263,7 +263,9 @@ test("review --effort high with explicit --model opus does NOT auto-fallback", (
           findings: [],
           next_steps: []
         }),
-        unavailableModels: ["claude-opus-4.6"]
+        // v0.11 refresh: `opus` alias now resolves to claude-opus-4.7,
+        // so the fixture must unavailable-list the resolved target.
+        unavailableModels: ["claude-opus-4.7"]
       },
       spawnLog
     }
@@ -273,7 +275,7 @@ test("review --effort high with explicit --model opus does NOT auto-fallback", (
   // but no retry notice, because the user explicitly picked the model.
   assert.match(
     result.stderr,
-    /--effort high is ignored because --model claude-opus-4\.6 was also passed/
+    /--effort high is ignored because --model claude-opus-4\.7 was also passed/
   );
   assert.doesNotMatch(
     result.stderr,
