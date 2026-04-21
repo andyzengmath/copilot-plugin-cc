@@ -67,17 +67,27 @@ const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
 const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
 // User-facing shorthand for the most-reached-for Copilot models. The
 // right-hand side is whatever Copilot ships as the current "major" of
-// each family — refresh when Copilot's `--help` advances a family's
-// top model. Concrete model names (e.g. `claude-opus-4.5`,
-// `gpt-5.1-codex-max`) always work via `--model` pass-through without
-// needing an alias here.
+// each family — refresh when Copilot publishes a newer top model
+// (check https://docs.github.com/en/copilot/reference/ai-models/supported-models
+// rather than local `copilot --help`, which lags the catalog). Concrete
+// model names (e.g. `claude-opus-4.5`, `gpt-5.1-codex-max`, `gpt-5.4-mini`)
+// always work via `--model` pass-through without needing an alias.
+//
+// Premium-multiplier caveat: `claude-opus-4.7` currently sits at a 7.5x
+// Copilot premium-request multiplier (through 2026-04-30), so `--model
+// opus` is user-pays-more relative to the v0.0.10-era `opus` → 4.6
+// mapping. Users who want the pre-4.7 cost can type `--model
+// claude-opus-4.6` explicitly. The plugin's `--effort high` default
+// (EFFORT_TO_MODEL below) deliberately stays on `claude-opus-4.6` so
+// automated flows that rely on `--effort` don't change their per-call
+// cost without an explicit user decision.
 const MODEL_ALIASES = new Map([
   ["fast", "claude-opus-4.6-fast"],
-  ["opus", "claude-opus-4.6"],
-  ["sonnet", "claude-sonnet-4.5"],
+  ["opus", "claude-opus-4.7"],
+  ["sonnet", "claude-sonnet-4.6"],
   ["haiku", "claude-haiku-4.5"],
-  ["gpt", "gpt-5.2"],
-  ["codex", "gpt-5.2-codex"]
+  ["gpt", "gpt-5.4"],
+  ["codex", "gpt-5.3-codex"]
 ]);
 // Copilot CLI has no per-call reasoning-effort knob. We translate the
 // codex-plugin-cc `--effort` levels into a matching model choice.
