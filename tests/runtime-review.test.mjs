@@ -204,7 +204,7 @@ function readSpawnLog(spawnLogPath) {
     .map((line) => JSON.parse(line));
 }
 
-test("review --effort high falls back to --model claude-sonnet-4.5 when claude-opus-4.6 is unavailable", () => {
+test("review --effort high falls back to --model claude-sonnet-4.6 when claude-opus-4.6 is unavailable", () => {
   const pluginData = makeTempDir();
   const repo = seedDirtyRepo();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
@@ -230,7 +230,7 @@ test("review --effort high falls back to --model claude-sonnet-4.5 when claude-o
   assert.match(result.stdout, /Verdict: approve/);
   assert.match(
     result.stderr,
-    /claude-opus-4\.6.*unavailable.*retrying.*claude-sonnet-4\.5.*fallback chain/i,
+    /claude-opus-4\.6.*unavailable.*retrying.*claude-sonnet-4\.6.*fallback chain/i,
     `expected fallback notice on stderr; got: ${result.stderr}`
   );
   const entries = readSpawnLog(spawnLog);
@@ -243,7 +243,7 @@ test("review --effort high falls back to --model claude-sonnet-4.5 when claude-o
   const firstModel = cliEntries[0].argv[cliEntries[0].argv.indexOf("--model") + 1];
   const secondModel = cliEntries[1].argv[cliEntries[1].argv.indexOf("--model") + 1];
   assert.equal(firstModel, "claude-opus-4.6");
-  assert.equal(secondModel, "claude-sonnet-4.5");
+  assert.equal(secondModel, "claude-sonnet-4.6");
 });
 
 test("review --effort high with explicit --model opus does NOT auto-fallback", () => {
