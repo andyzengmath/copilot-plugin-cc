@@ -1,8 +1,8 @@
 # copilot-plugin-cc — post-v0.0.8 handoff notes
 
 **Date:** 2026-04-20
-**Last shipped tag:** `v0.0.8`
-**Main state:** 147 tests / 146 pass / 1 skipped / 0 fail on both `ubuntu-latest` and `windows-latest` CI.
+**Last shipped tag:** `v0.0.9` (was `v0.0.8` when this doc was first written — see [v0.0.9 update](#v009-update) at the bottom).
+**Main state:** 148 tests / 147 pass / 1 skipped / 0 fail on both `ubuntu-latest` and `windows-latest` CI.
 
 Follow-on to [`2026-04-20-v08-handoff.md`](./2026-04-20-v08-handoff.md). Re-read that file for the full v0.0.1 → v0.0.7 history, conventions, release process, and fixture/test patterns — it's all still accurate. This file only captures what changed in the v0.0.8 cycle and the current backlog.
 
@@ -80,8 +80,45 @@ node --test tests/*.test.mjs    # expect 147 / 146 pass / 1 skipped, ~20 min on 
 
 ### Suggested first steps
 
-No v1.1-tier items remain tractable. Reasonable options for a v0.9 cycle:
+All three suggestions below are completed as of v0.0.9; see the [v0.0.9 update](#v009-update) for what's left.
 
-- **Polish PR from the PR-#29 review follow-ups.** Small, self-contained, ships measurable tidying. Good warmup for a fresh session.
-- **Upstream check on Copilot CLI.** Look for new ACP flags (per-session sandboxing) and stdin/prompt-file support (would unblock the Windows review-path work).
-- **Feature work outside the v1.1 backlog.** Pick something user-facing — e.g. a new `/copilot:*` command or a reporting enhancement — once upstream checks have been done.
+- ~~Polish PR from the PR-#29 review follow-ups~~ — shipped as PRs #32 and #33.
+- ~~Upstream check on Copilot CLI~~ — done; findings in the v0.0.9 update.
+- Feature work outside the v1.1 backlog — still open; no specific item queued.
+
+---
+
+## v0.0.9 update
+
+**Date:** 2026-04-20 (same day as the original doc)
+**Tag:** [`v0.0.9`](https://github.com/andyzengmath/copilot-plugin-cc/releases/tag/v0.0.9)
+
+### Shipped
+
+| PR  | Theme                                                                                                |
+| --- | ---------------------------------------------------------------------------------------------------- |
+| #32 | v0.9 (1/N) `validateReviewOutput` un-exported; `normalizeReviewFinding` simplified to trim-only.     |
+| #33 | v0.9 (2/N) Review-output `minLength:1` string checks aligned on `.trim().length` (was asymmetric).   |
+| #34 | Release bump to v0.0.9.                                                                              |
+
+All three "Code-review follow-ups from PR #29" from the Parking lot above are now closed.
+
+### Upstream Copilot CLI check (recorded so the next session doesn't repeat it)
+
+Ran `copilot --help` against a real install (npm-global `C:\ProgramData\global-npm\copilot.cmd`) on 2026-04-20 to look for unblock paths.
+
+- **No stdin / `--prompt-file` for `-p`.** `--prompt <text>` / `--interactive <prompt>` only accept positional text. That rules out piping a prompt past argv to dodge the Windows cmd.exe metachar issue on the review path. If upstream ever adds stdin support, it would unblock the Windows review-path item with a trivial change.
+- **Per-tool / per-URL restriction flags exist** (`--deny-tool`, `--excluded-tools`, `--available-tools`, `--deny-url`, `--allow-url`), but they're spawn-time flags on the broker process. Applying them makes them global to the broker, not per-ACP-session. Per-session sandboxing (v1.1 item 3) stays upstream-blocked until Copilot exposes these via the ACP `session/new` surface rather than as CLI-only args.
+- **New models visible in `--help`** that weren't in the v0.5 `EFFORT_TO_MODEL` design window: `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5-mini`, `claude-opus-4.5`, `claude-haiku-4.5`. The plugin passes `--model` through verbatim — these already work for users; no plugin change needed unless we want to retune `EFFORT_TO_MODEL`.
+- **New workflow flags** (`--yolo`, `--allow-all`, `--share`, `--share-gist`, `--no-ask-user`, `--stream`) — nothing on this list alters any current decision. `--allow-all` is a superset alias of what we already pin in `DEFAULT_COPILOT_SPAWN_ARGS`.
+
+### Current backlog (after the upstream check)
+
+- **Upstream-blocked, check periodically for unblock:**
+  - Per-ACP-session sandboxing (v1.1 item 3) — needs session-level permission surface in ACP.
+  - Windows review-path `--effort` without the shell-metachar deny-list tripping on XML tags — needs `-p` stdin / `--prompt-file` support.
+- **Open-ended:**
+  - Feature work outside the v1.1 backlog (new `/copilot:*` commands, reporting enhancements, etc.). No specific item queued.
+  - `EFFORT_TO_MODEL` tuning if the new model IDs (above) become preferred defaults.
+
+Nothing is urgent. A clean stopping point.
