@@ -546,7 +546,7 @@ test("task --resume-last --effort high collapses the fallback chain on the broke
   );
 });
 
-test("task --background --effort high falls back to --model claude-sonnet-4.5 via the worker path", () => {
+test("task --background --effort high falls back to --model claude-sonnet-4.5 via the worker path", async () => {
   const pluginData = makeTempDir();
   const result = runCompanion(
     ["task", "--background", "--effort", "high", "bg work"],
@@ -574,7 +574,20 @@ test("task --background --effort high falls back to --model claude-sonnet-4.5 vi
   // truncated content — tolerate partial reads by retrying rather than
   // throwing "Unexpected end of JSON input" and failing the test on
   // Windows where filesystem timing makes the race more frequent.
-  const deadline = Date.now() + 90000;
+  //
+  // Previously used a synchronous busy-spin between polls (`while
+  // (Date.now() - start < 500) {}`). Under full-suite parallel load
+  // on Windows, that tight loop actively competed for CPU with the
+  // detached worker subprocess, starving it and sometimes pushing the
+  // job past the deadline — the test flaked at the rate that
+  // --effort high fallback wall-clock plus ~3 Copilot-CLI spawn
+  // cold-starts exceeded 90 s. Switching to an async `await setTimeout`
+  // between polls releases the event loop so the worker's spawn
+  // completions and writeJobFile calls can be handled, and bumps the
+  // overall deadline to 180 s to give the three-spawn fallback path
+  // (availability probe + primary + first fallback) a safer margin
+  // on loaded Windows.
+  const deadline = Date.now() + 180000;
   let job;
   while (Date.now() < deadline) {
     const jobFile = fs.readdirSync(jobsDir).find((name) => name.endsWith(".json"));
@@ -586,11 +599,7 @@ test("task --background --effort high falls back to --model claude-sonnet-4.5 vi
         // Partial write; retry next poll.
       }
     }
-    // Busy-wait sparingly to keep this test bounded.
-    const start = Date.now();
-    while (Date.now() - start < 500) {
-      /* spin */
-    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
   assert.ok(job, "expected a worker job record");
   assert.equal(
