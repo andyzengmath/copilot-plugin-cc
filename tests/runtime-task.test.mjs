@@ -337,6 +337,79 @@ test("task --effort high exhausts the fallback chain when every tier is unavaila
   assert.equal(cliEntries.length, 4, "expected four -p invocations across the full chain");
 });
 
+test("task --effort medium falls back to claude-haiku-4.5 when sonnet and fast are both unavailable", () => {
+  // Locks in that the v0.10 medium chain walks all the way to
+  // haiku-4.5. Without this, a regression that truncated the medium
+  // chain at fast would still pass the high-chain tests above.
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "medium", "hi"],
+    {
+      pluginData,
+      script: {
+        ...buildScriptedPrompt("haiku ok"),
+        unavailableModels: ["claude-sonnet-4.5", "claude-opus-4.6-fast"]
+      },
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /haiku ok/);
+  const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
+  assert.equal(
+    noticeMatches.length,
+    2,
+    `expected two retry notices (sonnet → fast → haiku); got ${noticeMatches.length}`
+  );
+  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 3, "expected three -p invocations: sonnet, fast, haiku");
+  const tail = cliEntries[cliEntries.length - 1];
+  const modelIdx = tail.argv.indexOf("--model");
+  assert.equal(
+    tail.argv[modelIdx + 1],
+    "claude-haiku-4.5",
+    "tail invocation must use claude-haiku-4.5"
+  );
+});
+
+test("task --effort medium exhausts the fallback chain when every tier is unavailable", () => {
+  // Mirror of the --effort high exhaustion test for the shorter medium
+  // chain. Without this, a regression that silently shortened the
+  // medium chain would go unnoticed because the high-chain test still
+  // passes on its own (longer) chain.
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "medium", "hi"],
+    {
+      pluginData,
+      script: {
+        ...buildScriptedPrompt("never seen"),
+        unavailableModels: [
+          "claude-sonnet-4.5",
+          "claude-opus-4.6-fast",
+          "claude-haiku-4.5"
+        ]
+      },
+      spawnLog
+    }
+  );
+  assert.notEqual(result.status, 0);
+  const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
+  assert.equal(
+    noticeMatches.length,
+    2,
+    `expected two retry notices (sonnet → fast → haiku); got ${noticeMatches.length}`
+  );
+  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
+  assert.equal(
+    cliEntries.length,
+    3,
+    "expected three -p invocations across the full medium chain"
+  );
+});
+
 test("task --effort high with explicit --model opus does NOT auto-fallback", () => {
   const pluginData = makeTempDir();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");

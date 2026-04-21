@@ -114,6 +114,32 @@ test("setup --probe-models marks account-unavailable models correctly", () => {
   );
 });
 
+test("setup --probe-models surfaces claude-haiku-4.5 in nextSteps when it is the only unavailable tier", () => {
+  // Regression guard: haiku-4.5 was added in v0.10 as the tail of the
+  // medium/high fallback chains. If the probe's model-union ever drops
+  // fallback-chain entries, haiku availability would silently disappear
+  // from --probe-models output and this test would catch it.
+  const pluginData = makeTempDir();
+
+  const result = runCompanion(
+    ["setup", "--probe-models"],
+    {
+      pluginData,
+      script: pingScript({ unavailableModels: ["claude-haiku-4.5"] })
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /- claude-opus-4\.6: ok/);
+  assert.match(result.stdout, /- claude-sonnet-4\.5: ok/);
+  assert.match(result.stdout, /- claude-opus-4\.6-fast: ok/);
+  assert.match(result.stdout, /- claude-haiku-4\.5: unavailable/);
+  assert.match(
+    result.stdout,
+    /--effort tiers are unavailable[\s\S]*claude-haiku-4\.5/i,
+    "nextSteps must name claude-haiku-4.5 as the unavailable tier"
+  );
+});
+
 test("setup --probe-models JSON output includes modelProbe array", () => {
   const pluginData = makeTempDir();
 
