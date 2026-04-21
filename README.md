@@ -182,7 +182,7 @@ See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and
 the per-command porting decisions.
 
-## Status (v0.0.6)
+## Status (v0.0.12)
 
 - Core runtime, broker, companion, and hooks all ported and under test.
 - Standard and adversarial review commands share one prompt-engineered
@@ -198,6 +198,21 @@ the per-command porting decisions.
   the plugin walks the fallback chain defined in the table under
   [`/copilot:rescue`](#copilotrescue) with a stderr notice on each
   retry. Explicit `--model` never auto-falls-back.
+- Multi-session broker coordination via a workspace-scoped
+  `broker.lock` file (v0.0.8). Two Claude sessions starting on the
+  same workspace simultaneously share one `copilot --acp` broker
+  instead of racing to spawn duplicates. Fast path (live `broker.json`
+  + reachable endpoint) skips the lock entirely so single-session
+  reuse stays zero-overhead.
+- Review-output enforcement walks every constraint in
+  `plugins/copilot/schemas/review-output.schema.json` end-to-end
+  (v0.0.8 + v0.0.9 tightening). Violations render as a bulleted
+  `Schema violations:` section, not a short-circuited "first error"
+  message.
+- `--effort` fallback chain extends through `claude-haiku-4.5` as the
+  lowest-cost last-resort tier (v0.0.10). User-facing aliases
+  (`opus`, `sonnet`, `gpt`, `codex`) track Copilot's current top-of-
+  family models (v0.0.11 + v0.0.12).
 - A conservative shell-metacharacter deny-list fires on the shell-
   enabled spawn path (Windows production with the real `.cmd`
   launcher) so user-controlled prompts can't become a cmd.exe
@@ -205,15 +220,18 @@ the per-command porting decisions.
   passes to `CreateProcess` / `execve` verbatim, so the deny-list
   is skipped — safely — rather than rejecting legitimately-structured
   review prompts (XML tags, code fences).
-- All four design-doc "Open questions for implementation time" are
-  resolved as of v0.0.5; v0.0.6 added the review-path extension and
-  hardened the fallback chain (resume short-circuit, empty-chain
-  guard, hoisted `threadName`).
 - Test coverage is end-to-end against a spawnable fake-ACP fixture
-  (`tests/fake-copilot.mjs`). 134 tests across runtime suites, unit
+  (`tests/fake-copilot.mjs`). 153 tests across runtime suites, unit
   tests (SHELL_METACHAR_RE, isModelUnavailableStderr, prompt loader,
-  firstAllowOption, broker endpoint, etc.), and the protocol-agnostic
-  set. CI runs on every PR on Ubuntu + Windows.
+  firstAllowOption, broker endpoint, schema validator, etc.), and the
+  protocol-agnostic set. CI runs on every PR on Ubuntu + Windows.
+
+All three v1.1-deferred items from the original design doc are now
+either shipped (concurrent broker reuse → v0.0.8; structured-output
+enforcement → v0.0.8) or confirmed upstream-blocked
+(per-ACP-session sandboxing). See
+[`docs/plans/2026-04-20-v08-handoff.md`](docs/plans/2026-04-20-v08-handoff.md)
+for the running backlog and per-release details.
 
 All three items that this section previously listed as deferred have
 shipped: the setup-time model probe landed in v0.0.7 as
