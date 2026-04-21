@@ -118,7 +118,10 @@ Flags: `--background`, `--wait`, `--resume`, `--fresh`, `--model <name>`, `--eff
 
 **Model aliases**: `fast` → `claude-opus-4.6-fast`, `opus` →
 `claude-opus-4.6`, `sonnet` → `claude-sonnet-4.5`, `haiku` →
-`claude-haiku-4.5`. Any concrete Copilot model name works too.
+`claude-haiku-4.5`, `gpt` → `gpt-5.2`, `codex` → `gpt-5.2-codex`.
+Any concrete Copilot model name works too — e.g.
+`--model claude-opus-4.5` or `--model gpt-5.1-codex-max` — even if
+it doesn't have a short alias.
 
 **Effort → model mapping**: Copilot CLI has no per-call reasoning knob, so
 `--effort` is translated:

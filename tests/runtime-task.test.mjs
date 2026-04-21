@@ -110,6 +110,31 @@ function readSpawnLog(spawnLogPath) {
     .map((line) => JSON.parse(line));
 }
 
+test("task --model codex resolves the alias to --model gpt-5.2-codex via -p", () => {
+  // Locks in the v0.10 addition of the `codex` alias so a refactor
+  // of MODEL_ALIASES doesn't silently drop GPT-family shortcuts.
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--model", "codex", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("codex ok"),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /codex ok/);
+  const cli = readSpawnLog(spawnLog).find((entry) => entry.argv.includes("-p"));
+  assert.ok(cli, "expected a -p invocation");
+  const modelIdx = cli.argv.indexOf("--model");
+  assert.equal(
+    cli.argv[modelIdx + 1],
+    "gpt-5.2-codex",
+    `expected --model gpt-5.2-codex after alias resolution; got ${JSON.stringify(cli.argv)}`
+  );
+});
+
 test("task --model haiku bypasses the broker and passes --model claude-haiku-4.5 via -p", () => {
   const pluginData = makeTempDir();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");

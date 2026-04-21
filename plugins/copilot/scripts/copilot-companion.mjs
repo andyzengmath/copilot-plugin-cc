@@ -65,11 +65,19 @@ const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
 const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+// User-facing shorthand for the most-reached-for Copilot models. The
+// right-hand side is whatever Copilot ships as the current "major" of
+// each family — refresh when Copilot's `--help` advances a family's
+// top model. Concrete model names (e.g. `claude-opus-4.5`,
+// `gpt-5.1-codex-max`) always work via `--model` pass-through without
+// needing an alias here.
 const MODEL_ALIASES = new Map([
   ["fast", "claude-opus-4.6-fast"],
   ["opus", "claude-opus-4.6"],
   ["sonnet", "claude-sonnet-4.5"],
-  ["haiku", "claude-haiku-4.5"]
+  ["haiku", "claude-haiku-4.5"],
+  ["gpt", "gpt-5.2"],
+  ["codex", "gpt-5.2-codex"]
 ]);
 // Copilot CLI has no per-call reasoning-effort knob. We translate the
 // codex-plugin-cc `--effort` levels into a matching model choice.
