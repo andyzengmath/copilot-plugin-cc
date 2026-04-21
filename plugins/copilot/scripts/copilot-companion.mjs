@@ -95,7 +95,7 @@ const EFFORT_TO_MODEL = new Map([
   ["none", "claude-opus-4.6-fast"],
   ["minimal", "claude-opus-4.6-fast"],
   ["low", "claude-opus-4.6-fast"],
-  ["medium", "claude-sonnet-4.5"],
+  ["medium", "claude-sonnet-4.6"],
   ["high", "claude-opus-4.6"],
   ["xhigh", "claude-opus-4.6"]
 ]);
@@ -118,8 +118,8 @@ const EFFORT_FALLBACK_CHAIN = new Map([
   ["minimal", []],
   ["low", []],
   ["medium", ["claude-opus-4.6-fast", "claude-haiku-4.5"]],
-  ["high", ["claude-sonnet-4.5", "claude-opus-4.6-fast", "claude-haiku-4.5"]],
-  ["xhigh", ["claude-sonnet-4.5", "claude-opus-4.6-fast", "claude-haiku-4.5"]]
+  ["high", ["claude-sonnet-4.6", "claude-opus-4.6-fast", "claude-haiku-4.5"]],
+  ["xhigh", ["claude-sonnet-4.6", "claude-opus-4.6-fast", "claude-haiku-4.5"]]
 ]);
 
 function applyEffortFallbackModel(model, effort) {

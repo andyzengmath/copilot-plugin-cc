@@ -25,10 +25,10 @@ Execution rules:
 Command selection:
 - Use exactly one `task` invocation per rescue handoff.
 - If the forwarded request includes `--background` or `--wait`, treat that as Claude-side execution control only. Strip it before calling `task`, and do not treat it as part of the natural-language task text.
-- If the forwarded request includes `--model`, pass it through to `task` unchanged. Accepted aliases: `fast` → `claude-opus-4.6-fast`, `opus` → `claude-opus-4.6`, `sonnet` → `claude-sonnet-4.5`, `haiku` → `claude-haiku-4.5`.
+- If the forwarded request includes `--model`, pass it through to `task` unchanged. Accepted aliases: `fast` → `claude-opus-4.6-fast`, `opus` → `claude-opus-4.7`, `sonnet` → `claude-sonnet-4.6`, `haiku` → `claude-haiku-4.5`, `gpt` → `gpt-5.4`, `codex` → `gpt-5.3-codex`. Any concrete Copilot model name works too; it passes through unchanged.
 - If the forwarded request includes `--effort`, pass it through to `task`. The companion maps effort to a Copilot model tier since Copilot CLI has no per-call reasoning knob:
   - `none`, `minimal`, `low` → `claude-opus-4.6-fast`
-  - `medium` → `claude-sonnet-4.5`
+  - `medium` → `claude-sonnet-4.6`
   - `high`, `xhigh` → `claude-opus-4.6`
 - If both `--model` and `--effort` are supplied, `--model` wins and `--effort` becomes a no-op (the companion emits a stderr notice).
 - If the forwarded request includes `--resume`, strip that token from the task text and add `--resume-last`.

@@ -67,7 +67,7 @@ test("setup --probe-models reports every model as ok when all are available", ()
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   assert.match(result.stdout, /Model availability \(--probe-models\)/);
   assert.match(result.stdout, /- claude-opus-4\.6-fast: ok/);
-  assert.match(result.stdout, /- claude-sonnet-4\.5: ok/);
+  assert.match(result.stdout, /- claude-sonnet-4\.6: ok/);
   assert.match(result.stdout, /- claude-opus-4\.6: ok/);
   assert.match(result.stdout, /- claude-haiku-4\.5: ok/);
 
@@ -85,7 +85,7 @@ test("setup --probe-models reports every model as ok when all are available", ()
   });
   assert.deepEqual(
     probedModels.sort(),
-    ["claude-haiku-4.5", "claude-opus-4.6", "claude-opus-4.6-fast", "claude-sonnet-4.5"]
+    ["claude-haiku-4.5", "claude-opus-4.6", "claude-opus-4.6-fast", "claude-sonnet-4.6"]
   );
 });
 
@@ -102,7 +102,7 @@ test("setup --probe-models marks account-unavailable models correctly", () => {
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   // Available models stay "ok"; the unavailable one lands on the
   // availability line with its Copilot-CLI-style error as the detail.
-  assert.match(result.stdout, /- claude-sonnet-4\.5: ok/);
+  assert.match(result.stdout, /- claude-sonnet-4\.6: ok/);
   assert.match(result.stdout, /- claude-opus-4\.6-fast: ok/);
   assert.match(result.stdout, /- claude-opus-4\.6: unavailable/);
   assert.match(result.stdout, /model claude-opus-4\.6 is not available/);
@@ -130,7 +130,7 @@ test("setup --probe-models surfaces claude-haiku-4.5 in nextSteps when it is the
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   assert.match(result.stdout, /- claude-opus-4\.6: ok/);
-  assert.match(result.stdout, /- claude-sonnet-4\.5: ok/);
+  assert.match(result.stdout, /- claude-sonnet-4\.6: ok/);
   assert.match(result.stdout, /- claude-opus-4\.6-fast: ok/);
   assert.match(result.stdout, /- claude-haiku-4\.5: unavailable/);
   assert.match(
@@ -157,6 +157,6 @@ test("setup --probe-models JSON output includes modelProbe array", () => {
   const opus = report.modelProbe.find((r) => r.model === "claude-opus-4.6");
   assert.equal(opus.available, false);
   assert.match(opus.detail, /not available/);
-  const sonnet = report.modelProbe.find((r) => r.model === "claude-sonnet-4.5");
+  const sonnet = report.modelProbe.find((r) => r.model === "claude-sonnet-4.6");
   assert.equal(sonnet.available, true);
 });

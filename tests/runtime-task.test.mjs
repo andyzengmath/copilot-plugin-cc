@@ -322,7 +322,7 @@ test("task --resume-last with --model emits a stderr notice and stays on the bro
   );
 });
 
-test("task --effort high falls back to --model claude-sonnet-4.5 when claude-opus-4.6 is unavailable", () => {
+test("task --effort high falls back to --model claude-sonnet-4.6 when claude-opus-4.6 is unavailable", () => {
   const pluginData = makeTempDir();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
   const result = runCompanion(
@@ -340,7 +340,7 @@ test("task --effort high falls back to --model claude-sonnet-4.5 when claude-opu
   assert.match(result.stdout, /fallback ok/);
   assert.match(
     result.stderr,
-    /claude-opus-4\.6.*unavailable.*retrying.*claude-sonnet-4\.5.*fallback chain/i,
+    /claude-opus-4\.6.*unavailable.*retrying.*claude-sonnet-4\.6.*fallback chain/i,
     `expected fallback notice on stderr; got: ${result.stderr}`
   );
   const entries = readSpawnLog(spawnLog);
@@ -353,7 +353,7 @@ test("task --effort high falls back to --model claude-sonnet-4.5 when claude-opu
   const firstModel = cliEntries[0].argv[cliEntries[0].argv.indexOf("--model") + 1];
   const secondModel = cliEntries[1].argv[cliEntries[1].argv.indexOf("--model") + 1];
   assert.equal(firstModel, "claude-opus-4.6");
-  assert.equal(secondModel, "claude-sonnet-4.5");
+  assert.equal(secondModel, "claude-sonnet-4.6");
 });
 
 test("task --effort high exhausts the fallback chain when every tier is unavailable", () => {
@@ -367,7 +367,7 @@ test("task --effort high exhausts the fallback chain when every tier is unavaila
         ...buildScriptedPrompt("never seen"),
         unavailableModels: [
           "claude-opus-4.6",
-          "claude-sonnet-4.5",
+          "claude-sonnet-4.6",
           "claude-opus-4.6-fast",
           "claude-haiku-4.5"
         ]
@@ -402,7 +402,7 @@ test("task --effort medium falls back to claude-haiku-4.5 when sonnet and fast a
       pluginData,
       script: {
         ...buildScriptedPrompt("haiku ok"),
-        unavailableModels: ["claude-sonnet-4.5", "claude-opus-4.6-fast"]
+        unavailableModels: ["claude-sonnet-4.6", "claude-opus-4.6-fast"]
       },
       spawnLog
     }
@@ -440,7 +440,7 @@ test("task --effort medium exhausts the fallback chain when every tier is unavai
       script: {
         ...buildScriptedPrompt("never seen"),
         unavailableModels: [
-          "claude-sonnet-4.5",
+          "claude-sonnet-4.6",
           "claude-opus-4.6-fast",
           "claude-haiku-4.5"
         ]
@@ -576,7 +576,7 @@ test("task --resume-last --effort high collapses the fallback chain on the broke
   );
 });
 
-test("task --background --effort high falls back to --model claude-sonnet-4.5 via the worker path", async () => {
+test("task --background --effort high falls back to --model claude-sonnet-4.6 via the worker path", async () => {
   const pluginData = makeTempDir();
   const result = runCompanion(
     ["task", "--background", "--effort", "high", "bg work"],

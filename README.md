@@ -137,8 +137,8 @@ Any concrete Copilot model name works too — e.g.
 | `--effort`                | Model                  | Fallback chain on unavailability                                         |
 |---------------------------|------------------------|--------------------------------------------------------------------------|
 | `none`, `minimal`, `low`  | `claude-opus-4.6-fast` | _(already lowest tier)_                                                  |
-| `medium` (default)        | `claude-sonnet-4.5`    | `claude-opus-4.6-fast` → `claude-haiku-4.5`                              |
-| `high`, `xhigh`           | `claude-opus-4.6`      | `claude-sonnet-4.5` → `claude-opus-4.6-fast` → `claude-haiku-4.5`        |
+| `medium` (default)        | `claude-sonnet-4.6`    | `claude-opus-4.6-fast` → `claude-haiku-4.5`                              |
+| `high`, `xhigh`           | `claude-opus-4.6`      | `claude-sonnet-4.6` → `claude-opus-4.6-fast` → `claude-haiku-4.5`        |
 
 If the primary effort-mapped model isn't available on your Copilot
 account, the plugin automatically retries down the chain and surfaces a
