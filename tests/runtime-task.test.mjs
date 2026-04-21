@@ -472,7 +472,9 @@ test("task --effort high with explicit --model opus does NOT auto-fallback", () 
       pluginData,
       script: {
         ...buildScriptedPrompt("never seen"),
-        unavailableModels: ["claude-opus-4.6"]
+        // v0.11 refresh: `opus` alias now resolves to claude-opus-4.7,
+        // so the fixture must unavailable-list the resolved target.
+        unavailableModels: ["claude-opus-4.7"]
       },
       spawnLog
     }
