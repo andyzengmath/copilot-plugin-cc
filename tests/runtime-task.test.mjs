@@ -315,24 +315,99 @@ test("task --effort high exhausts the fallback chain when every tier is unavaila
         unavailableModels: [
           "claude-opus-4.6",
           "claude-sonnet-4.5",
-          "claude-opus-4.6-fast"
+          "claude-opus-4.6-fast",
+          "claude-haiku-4.5"
         ]
       },
       spawnLog
     }
   );
   assert.notEqual(result.status, 0);
-  // Two retry notices, then the final unavailable error from the
-  // tail-of-chain spawn surfaces in the rendered failure path.
+  // Three retry notices as the chain walks opus-4.6 → sonnet-4.5 →
+  // opus-4.6-fast → haiku-4.5 and the tail-of-chain spawn surfaces
+  // the final unavailable error through the rendered failure path.
+  const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
+  assert.equal(
+    noticeMatches.length,
+    3,
+    `expected three retry notices (high → sonnet → fast → haiku); got ${noticeMatches.length}`
+  );
+  const entries = readSpawnLog(spawnLog);
+  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 4, "expected four -p invocations across the full chain");
+});
+
+test("task --effort medium falls back to claude-haiku-4.5 when sonnet and fast are both unavailable", () => {
+  // Locks in that the v0.10 medium chain walks all the way to
+  // haiku-4.5. Without this, a regression that truncated the medium
+  // chain at fast would still pass the high-chain tests above.
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "medium", "hi"],
+    {
+      pluginData,
+      script: {
+        ...buildScriptedPrompt("haiku ok"),
+        unavailableModels: ["claude-sonnet-4.5", "claude-opus-4.6-fast"]
+      },
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /haiku ok/);
   const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
   assert.equal(
     noticeMatches.length,
     2,
-    `expected two retry notices (high → sonnet → fast); got ${noticeMatches.length}`
+    `expected two retry notices (sonnet → fast → haiku); got ${noticeMatches.length}`
   );
-  const entries = readSpawnLog(spawnLog);
-  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
-  assert.equal(cliEntries.length, 3, "expected three -p invocations across the full chain");
+  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 3, "expected three -p invocations: sonnet, fast, haiku");
+  const tail = cliEntries[cliEntries.length - 1];
+  const modelIdx = tail.argv.indexOf("--model");
+  assert.equal(
+    tail.argv[modelIdx + 1],
+    "claude-haiku-4.5",
+    "tail invocation must use claude-haiku-4.5"
+  );
+});
+
+test("task --effort medium exhausts the fallback chain when every tier is unavailable", () => {
+  // Mirror of the --effort high exhaustion test for the shorter medium
+  // chain. Without this, a regression that silently shortened the
+  // medium chain would go unnoticed because the high-chain test still
+  // passes on its own (longer) chain.
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "medium", "hi"],
+    {
+      pluginData,
+      script: {
+        ...buildScriptedPrompt("never seen"),
+        unavailableModels: [
+          "claude-sonnet-4.5",
+          "claude-opus-4.6-fast",
+          "claude-haiku-4.5"
+        ]
+      },
+      spawnLog
+    }
+  );
+  assert.notEqual(result.status, 0);
+  const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
+  assert.equal(
+    noticeMatches.length,
+    2,
+    `expected two retry notices (sonnet → fast → haiku); got ${noticeMatches.length}`
+  );
+  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
+  assert.equal(
+    cliEntries.length,
+    3,
+    "expected three -p invocations across the full medium chain"
+  );
 });
 
 test("task --effort high with explicit --model opus does NOT auto-fallback", () => {

@@ -90,13 +90,18 @@ const EFFORT_TO_MODEL = new Map([
 // then walks this list. Entries lower in the chain are progressively
 // less capable but more widely available (Copilot Free / Pro / Business
 // tiers ship subsets of these models).
+// `claude-haiku-4.5` pins the tail of the medium/high chains as the
+// lowest-cost, widest-availability Claude tier. Added in v0.10 after a
+// `copilot --help` audit confirmed the model is exposed on every tier
+// that ships `--model` support. Strictly-additive: it never fires while
+// an earlier tier is available.
 const EFFORT_FALLBACK_CHAIN = new Map([
   ["none", []],
   ["minimal", []],
   ["low", []],
-  ["medium", ["claude-opus-4.6-fast"]],
-  ["high", ["claude-sonnet-4.5", "claude-opus-4.6-fast"]],
-  ["xhigh", ["claude-sonnet-4.5", "claude-opus-4.6-fast"]]
+  ["medium", ["claude-opus-4.6-fast", "claude-haiku-4.5"]],
+  ["high", ["claude-sonnet-4.5", "claude-opus-4.6-fast", "claude-haiku-4.5"]],
+  ["xhigh", ["claude-sonnet-4.5", "claude-opus-4.6-fast", "claude-haiku-4.5"]]
 ]);
 
 function applyEffortFallbackModel(model, effort) {
@@ -251,13 +256,22 @@ async function buildSetupReport(cwd, actionsTaken = [], options = {}) {
     nextSteps.push("Optional: run `/copilot:setup --enable-review-gate` to require a fresh review before stop.");
   }
 
-  // --probe-models runs `copilot -p "ping" --model <m>` against each
-  // distinct model in EFFORT_TO_MODEL and reports availability per
-  // account. Skipped by default to keep the default setup fast (each
-  // probe is a full subprocess round-trip).
+  // --probe-models runs `copilot -p "ping" --model <m>` against every
+  // distinct model that any --effort level could reach — the union of
+  // EFFORT_TO_MODEL primaries and every tier in EFFORT_FALLBACK_CHAIN.
+  // Before v0.10 this only covered the primaries, which hid the
+  // fallback tiers from the probe (users could see "all ok" and still
+  // fall through to a model their account couldn't actually reach).
+  // Skipped by default to keep the default setup fast (each probe is a
+  // full subprocess round-trip).
   let modelProbe = null;
   if (options.probeModels && copilotStatus.available) {
-    const models = [...new Set(EFFORT_TO_MODEL.values())];
+    const models = [
+      ...new Set([
+        ...EFFORT_TO_MODEL.values(),
+        ...[...EFFORT_FALLBACK_CHAIN.values()].flat()
+      ])
+    ];
     modelProbe = await probeModelAvailability(cwd, { models });
     const unavailable = modelProbe.filter((r) => !r.available && !r.unknown);
     if (unavailable.length > 0) {

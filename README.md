@@ -123,11 +123,11 @@ Flags: `--background`, `--wait`, `--resume`, `--fresh`, `--model <name>`, `--eff
 **Effort → model mapping**: Copilot CLI has no per-call reasoning knob, so
 `--effort` is translated:
 
-| `--effort`                | Model                  | Fallback chain on unavailability                      |
-|---------------------------|------------------------|-------------------------------------------------------|
-| `none`, `minimal`, `low`  | `claude-opus-4.6-fast` | _(already lowest tier)_                               |
-| `medium` (default)        | `claude-sonnet-4.5`    | `claude-opus-4.6-fast`                                |
-| `high`, `xhigh`           | `claude-opus-4.6`      | `claude-sonnet-4.5` → `claude-opus-4.6-fast`          |
+| `--effort`                | Model                  | Fallback chain on unavailability                                         |
+|---------------------------|------------------------|--------------------------------------------------------------------------|
+| `none`, `minimal`, `low`  | `claude-opus-4.6-fast` | _(already lowest tier)_                                                  |
+| `medium` (default)        | `claude-sonnet-4.5`    | `claude-opus-4.6-fast` → `claude-haiku-4.5`                              |
+| `high`, `xhigh`           | `claude-opus-4.6`      | `claude-sonnet-4.5` → `claude-opus-4.6-fast` → `claude-haiku-4.5`        |
 
 If the primary effort-mapped model isn't available on your Copilot
 account, the plugin automatically retries down the chain and surfaces a
@@ -184,9 +184,9 @@ the per-command porting decisions.
   one-shot subprocess. Applied uniformly across `/copilot:task`,
   `/copilot:review`, and `/copilot:adversarial-review`. When the
   effort-mapped model isn't available on the user's Copilot account,
-  the plugin walks the fallback chain (high → sonnet → fast; medium
-  → fast) with a stderr notice on each retry. Explicit `--model` never
-  auto-falls-back.
+  the plugin walks the fallback chain defined in the table under
+  [`/copilot:rescue`](#copilotrescue) with a stderr notice on each
+  retry. Explicit `--model` never auto-falls-back.
 - A conservative shell-metacharacter deny-list fires on the shell-
   enabled spawn path (Windows production with the real `.cmd`
   launcher) so user-controlled prompts can't become a cmd.exe
@@ -204,15 +204,12 @@ the per-command porting decisions.
   firstAllowOption, broker endpoint, etc.), and the protocol-agnostic
   set. CI runs on every PR on Ubuntu + Windows.
 
-Deferred to v0.7+:
-- Setup-time model probe: `/copilot:setup` could pre-check which
-  models in the `--effort` table are available on this Copilot
-  account so users see their tier upfront, instead of discovering it
-  at task time via fallback notices.
-- Cross-Claude-session broker coordination (per design doc
-  "Deferred to v1.1").
-- Structured-output enforcement beyond the current prompt-contract
-  approach (per design doc "Deferred to v1.1").
+All three items that this section previously listed as deferred have
+shipped: the setup-time model probe landed in v0.0.7 as
+`/copilot:setup --probe-models`; cross-Claude-session broker
+coordination landed in v0.0.8 via the workspace-scoped `broker.lock`
+(PR #28); structured-output enforcement for review JSON landed in
+v0.0.8 as the full schema walker in `validateReviewOutput` (PR #29).
 
 ## Security
 
