@@ -5,6 +5,65 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.10
+
+Extends the `--effort` fallback chain with `claude-haiku-4.5` as the
+lowest-cost, widest-availability tail tier. Strictly-additive: users
+on tiers where earlier fallbacks are available are unaffected; users
+who previously hit chain exhaustion on a busy Copilot account now
+get one more graceful tier before the call fails.
+
+Changed:
+- `EFFORT_FALLBACK_CHAIN` (PR #36): `claude-haiku-4.5` appended to
+  the tail of the `medium` and `high` / `xhigh` chains.
+  `medium`: `claude-sonnet-4.5` → `claude-opus-4.6-fast` →
+  `claude-haiku-4.5`. `high` / `xhigh`: `claude-opus-4.6` →
+  `claude-sonnet-4.5` → `claude-opus-4.6-fast` → `claude-haiku-4.5`.
+  The `none` / `minimal` / `low` tiers are unchanged (still no
+  fallback — their primary is already the lowest available tier).
+  Rationale in the code comment and in
+  `docs/plans/2026-04-20-post-v008-handoff.md#v009-update`: a
+  `copilot --help` audit on 2026-04-20 confirmed `claude-haiku-4.5`
+  is exposed on every tier that ships `--model` support.
+- `/copilot:setup --probe-models` (PR #36): the probe now covers the
+  union of `EFFORT_TO_MODEL` primaries AND every entry in
+  `EFFORT_FALLBACK_CHAIN`, rather than just the primaries. Users
+  previously could see "all probed models ok" while a fallback-only
+  tier was actually unavailable — the probe's coverage didn't match
+  what the runtime might reach. Automatically picks up new
+  `claude-haiku-4.5` tier.
+- `README.md` (PRs #36, #36 fixup): fallback-chain table on
+  `/copilot:rescue` updated with the haiku tail for `medium` and
+  `high` / `xhigh`. Status-section inline chain description now
+  points to the canonical table instead of restating a (now-stale)
+  shorter chain. "Deferred to v0.7+" list replaced with a one-
+  paragraph note on which release shipped each item (setup-time
+  model probe → v0.0.7; cross-Claude-session broker coordination →
+  v0.0.8 PR #28; structured-output enforcement → v0.0.8 PR #29).
+
+Added:
+- `tests/runtime-task.test.mjs` (+2 cases):
+  - `task --effort medium falls back to claude-haiku-4.5 when sonnet
+    and fast are both unavailable` — locks in that the medium chain
+    walks all the way to haiku rather than silently truncating.
+  - `task --effort medium exhausts the fallback chain when every
+    tier is unavailable` — mirror of the high-chain exhaustion test.
+- `tests/setup-probe.test.mjs` (+1 case):
+  - `setup --probe-models surfaces claude-haiku-4.5 in nextSteps
+    when it is the only unavailable tier` — regression guard
+    against the probe's model-union ever dropping fallback-chain
+    entries.
+- Existing tests updated for the new chain length: the
+  `--effort high` exhaustion test now expects 3 retry notices + 4
+  `-p` invocations; `setup --probe-models` tests expect 4 probe
+  spawns instead of 3.
+
+Test suite: 148 → 151 tests (+3). 150 pass, 1 skipped, 0 fail. CI
+green on both Linux and Windows.
+
+See merged PR #36 for the full review history (including both
+`/code-review:code-review` and `/soliton:pr-review` passes).
+
 ## 0.0.9
 
 Small polish cycle on the review-output render path introduced by
