@@ -364,7 +364,16 @@ function readCopilotConfig(env = process.env) {
   const configPath = resolveCopilotConfigPath(env);
   if (!fs.existsSync(configPath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const raw = fs.readFileSync(configPath, "utf8");
+    // Copilot CLI 1.0+ writes the config with a couple of leading
+    // JS-style line comments ("// User settings belong in settings.json.")
+    // which are not valid per strict JSON.parse. Strip any full-line
+    // `//` comments before parsing so the auth probe keeps working
+    // across the 0.x → 1.x schema flip. Block comments (`/* ... */`)
+    // aren't observed in the config, so we keep the stripper narrow
+    // rather than pulling in a JSON5 parser.
+    const stripped = raw.replace(/^\s*\/\/[^\n]*$/gm, "");
+    return JSON.parse(stripped);
   } catch {
     return null;
   }
@@ -401,9 +410,16 @@ export async function getCopilotAuthStatus(cwd, options = {}) {
 
   const env = options.env ?? process.env;
   const config = readCopilotConfig(env);
-  const loggedUsers = Array.isArray(config?.logged_in_users) ? config.logged_in_users : [];
+  // Field names flipped from snake_case to camelCase between Copilot
+  // CLI 0.x and 1.x (`logged_in_users` → `loggedInUsers`,
+  // `last_logged_in_user` → `lastLoggedInUser`). Accept either so a
+  // user on an older CLI, a test fixture using the legacy shape, or a
+  // freshly-upgraded CLI all resolve to the same loggedIn result.
+  const loggedUsersRaw = config?.loggedInUsers ?? config?.logged_in_users;
+  const loggedUsers = Array.isArray(loggedUsersRaw) ? loggedUsersRaw : [];
   if (loggedUsers.length > 0) {
-    const user = config.last_logged_in_user ?? loggedUsers[0];
+    const user =
+      config.lastLoggedInUser ?? config.last_logged_in_user ?? loggedUsers[0];
     const login = typeof user?.login === "string" ? user.login : null;
     return buildAuthStatus({
       loggedIn: true,
