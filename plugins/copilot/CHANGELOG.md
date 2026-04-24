@@ -5,6 +5,58 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.14
+
+Two bugs found during a real local install + login on Copilot CLI
+1.0.36. Both shipped in this release.
+
+Fixed:
+- `/copilot:setup` reported `loggedIn: false` even after a successful
+  `copilot login` (PR #52). Root cause: Copilot CLI 1.0+ changed the
+  `~/.copilot/config.json` schema in two ways the plugin didn't
+  track:
+  - The file now starts with JS-style `//` line comments that strict
+    `JSON.parse` rejects, so `readCopilotConfig` silently returned
+    `null`.
+  - Field names flipped snake_case → camelCase:
+    `logged_in_users` → `loggedInUsers`,
+    `last_logged_in_user` → `lastLoggedInUser`. Even on a success-
+    ful parse, the old field reads missed the signed-in user.
+
+  `readCopilotConfig` now strips full-line `//` comments before
+  parsing (narrow regex; block comments aren't observed in the
+  config). `getCopilotAuthStatus` reads both the camelCase and
+  snake_case key variants so CLI 0.x and 1.x both resolve.
+  `tests/copilot-auth-status.test.mjs` added (+5) covering both
+  schemas, missing file, empty users, and malformed JSON.
+- Marketplace manifest identifiers claimed "GitHub" ownership (PR
+  #51). Corrected to match the actual repo + author:
+  - `.claude-plugin/marketplace.json` `"name"`:
+    `"github-copilot"` → `"copilot-plugin-cc"` (matches repo slug).
+  - `.claude-plugin/marketplace.json` `"owner"` and
+    `plugins[0].author`: `"GitHub"` → `"andyzengmath"`.
+  - `plugins/copilot/.claude-plugin/plugin.json` `"author"`:
+    `"GitHub"` → `"andyzengmath"`.
+  - README install command updated from
+    `/plugin install copilot@github-copilot` to
+    `/plugin install copilot@copilot-plugin-cc`.
+
+  Cross-checked against Anthropic's own
+  `anthropics/claude-code/.claude-plugin/marketplace.json`, which
+  uses a self-describing marketplace name and the real author
+  rather than the name of any plugin inside.
+
+  **Breaking change** for users who installed via
+  `/plugin install copilot@github-copilot`: re-run with
+  `/plugin install copilot@copilot-plugin-cc` after updating. The
+  `/plugin marketplace add andyzengmath/copilot-plugin-cc` step is
+  unaffected (uses the repo path, not the manifest name).
+
+Test suite: 153 → 158 tests (+5 auth-status cases). 157 pass, 1
+skipped, 0 fail. CI green on both Linux and Windows.
+
+See merged PRs #51, #52 for the full review history.
+
 ## 0.0.13
 
 Small cleanup release. Two low-risk items that had drifted since
