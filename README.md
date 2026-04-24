@@ -35,7 +35,7 @@ Add the marketplace in Claude Code:
 Install the plugin:
 
 ```bash
-/plugin install copilot@github-copilot
+/plugin install copilot@copilot-plugin-cc
 ```
 
 Reload plugins:

@@ -1,7 +1,7 @@
 {
-  "name": "github-copilot",
+  "name": "copilot-plugin-cc",
   "owner": {
-    "name": "GitHub"
+    "name": "andyzengmath"
   },
   "metadata": {
     "description": "Copilot plugins to use in Claude Code for delegation and code review.",
@@ -13,7 +13,7 @@
       "description": "Use GitHub Copilot CLI from Claude Code to review code or delegate tasks.",
       "version": "0.0.13",
       "author": {
-        "name": "GitHub"
+        "name": "andyzengmath"
       },
       "source": "./plugins/copilot"
     }
