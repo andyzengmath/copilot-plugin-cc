@@ -355,28 +355,242 @@ export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) 
   };
 }
 
+function resolveCopilotHome(env = process.env) {
+  // Copilot CLI honors COPILOT_HOME first, then defaults to ~/.copilot. Older
+  // releases of this plugin only honored XDG_CONFIG_HOME, which never matched
+  // Copilot's own search path; keep XDG as a tail fallback for compatibility
+  // with anyone who scripted around the old behavior, but prefer the official
+  // env var.
+  if (env.COPILOT_HOME && env.COPILOT_HOME.trim()) {
+    return env.COPILOT_HOME.trim();
+  }
+  if (env.XDG_CONFIG_HOME && env.XDG_CONFIG_HOME.trim()) {
+    return path.join(env.XDG_CONFIG_HOME.trim(), ".copilot");
+  }
+  return path.join(os.homedir(), ".copilot");
+}
+
 function resolveCopilotConfigPath(env = process.env) {
-  const configHome = env.XDG_CONFIG_HOME && env.XDG_CONFIG_HOME.trim() ? env.XDG_CONFIG_HOME : os.homedir();
-  return path.join(configHome, ".copilot", "config.json");
+  // config.json holds auth + installed-plugins state. settings.json (read by
+  // resolveCopilotSettingsPath below) is the user-facing preferences file
+  // documented at https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/configure-copilot-cli.
+  return path.join(resolveCopilotHome(env), "config.json");
+}
+
+function resolveCopilotSettingsPath(env = process.env) {
+  return path.join(resolveCopilotHome(env), "settings.json");
+}
+
+function parseJsonWithLineComments(raw) {
+  // Both config.json and settings.json may carry full-line `// ...` comments.
+  // Strip them before parsing rather than pulling in a JSON5 parser.
+  const stripped = String(raw).replace(/^\s*\/\/[^\n]*$/gm, "");
+  return JSON.parse(stripped);
 }
 
 function readCopilotConfig(env = process.env) {
   const configPath = resolveCopilotConfigPath(env);
   if (!fs.existsSync(configPath)) return null;
   try {
-    const raw = fs.readFileSync(configPath, "utf8");
-    // Copilot CLI 1.0+ writes the config with a couple of leading
-    // JS-style line comments ("// User settings belong in settings.json.")
-    // which are not valid per strict JSON.parse. Strip any full-line
-    // `//` comments before parsing so the auth probe keeps working
-    // across the 0.x → 1.x schema flip. Block comments (`/* ... */`)
-    // aren't observed in the config, so we keep the stripper narrow
-    // rather than pulling in a JSON5 parser.
-    const stripped = raw.replace(/^\s*\/\/[^\n]*$/gm, "");
-    return JSON.parse(stripped);
+    return parseJsonWithLineComments(fs.readFileSync(configPath, "utf8"));
   } catch {
     return null;
   }
+}
+
+function readCopilotSettings(env = process.env) {
+  const settingsPath = resolveCopilotSettingsPath(env);
+  if (!fs.existsSync(settingsPath)) return null;
+  try {
+    return parseJsonWithLineComments(fs.readFileSync(settingsPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the model + effortLevel that a Copilot call will actually run with,
+ * and tag the source so the user can see whether it came from a per-call
+ * --model flag, the COPILOT_MODEL env var, ~/.copilot/settings.json, or the
+ * Copilot CLI's own built-in default.
+ *
+ * Precedence mirrors Copilot CLI's documented hierarchy
+ * (https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/configure-copilot-cli):
+ *   1. /model (interactive — not seen by us)
+ *   2. --model CLI flag at launch  → requestedModel here
+ *   3. COPILOT_MODEL env var
+ *   4. settings.json `model` key
+ *   5. system default (Claude Sonnet 4.5 today)
+ *
+ * effortLevel is only sourced from env / settings.json — there is no
+ * per-call equivalent in Copilot CLI < 1.0.11. Callers that pass
+ * --effort to /copilot:* still see it reflected separately in the call
+ * args; this helper only describes inherited state.
+ *
+ * @param {{ requestedModel?: string | null, env?: NodeJS.ProcessEnv }} [options]
+ * @returns {{ model: string | null, effortLevel: string | null, source: string }}
+ */
+export function getActiveCopilotModelInfo({ requestedModel = null, env = process.env } = {}) {
+  const trimmedRequested = typeof requestedModel === "string" ? requestedModel.trim() : "";
+  if (trimmedRequested) {
+    return { model: trimmedRequested, effortLevel: null, source: "--model flag" };
+  }
+  const envModel = typeof env.COPILOT_MODEL === "string" ? env.COPILOT_MODEL.trim() : "";
+  if (envModel) {
+    const envEffort = typeof env.COPILOT_EFFORT_LEVEL === "string" ? env.COPILOT_EFFORT_LEVEL.trim() : "";
+    return {
+      model: envModel,
+      effortLevel: envEffort || null,
+      source: "COPILOT_MODEL env"
+    };
+  }
+  const settings = readCopilotSettings(env);
+  const settingsModel = typeof settings?.model === "string" ? settings.model.trim() : "";
+  if (settingsModel) {
+    const settingsEffort = typeof settings?.effortLevel === "string" ? settings.effortLevel.trim() : "";
+    return {
+      model: settingsModel,
+      effortLevel: settingsEffort || null,
+      source: "~/.copilot/settings.json"
+    };
+  }
+  return { model: null, effortLevel: null, source: "Copilot CLI default" };
+}
+
+/**
+ * Render a single human-readable line describing the active model. Used by
+ * both the setup report and the per-call stderr echo so the two stay in
+ * sync when the format evolves.
+ *
+ * @param {{ model: string | null, effortLevel: string | null, source: string }} info
+ */
+export function formatActiveModelLine(info) {
+  if (!info) return "";
+  const modelLabel = info.model || "Copilot CLI default (claude-sonnet-4.5)";
+  const effortLabel = info.effortLevel ? `, effort ${info.effortLevel}` : "";
+  return `${modelLabel}${effortLabel} [${info.source}]`;
+}
+
+// Copilot CLI's settings.json effortLevel only accepts these tokens. The
+// plugin's --effort vocabulary additionally exposes "none" and "minimal" for
+// codex-plugin-cc parity; we collapse those onto "low" when writing through
+// to settings.json since Copilot would reject the literal value.
+const COPILOT_SETTINGS_EFFORT_VALUES = new Set(["low", "medium", "high", "xhigh"]);
+const PLUGIN_TO_COPILOT_EFFORT = new Map([
+  ["none", "low"],
+  ["minimal", "low"],
+  ["low", "low"],
+  ["medium", "medium"],
+  ["high", "high"],
+  ["xhigh", "xhigh"]
+]);
+
+export function normalizeEffortForSettings(effort) {
+  if (typeof effort !== "string") return null;
+  const lowered = effort.trim().toLowerCase();
+  if (!lowered) return null;
+  return PLUGIN_TO_COPILOT_EFFORT.get(lowered) ?? null;
+}
+
+/**
+ * Persist a model and/or effortLevel default into ~/.copilot/settings.json
+ * (or $COPILOT_HOME/settings.json), preserving every other key the user has
+ * already set. Used by `/copilot:setup --default-model X --default-effort Y`.
+ *
+ * Leading `// ...` line comments are preserved verbatim; trailing/inline
+ * comments are not (we never observed any in-the-wild settings.json with
+ * inline comments and the strip-and-restore approach for inline comments
+ * would require a JSONC parser we don't otherwise need).
+ *
+ * Atomic write: temp file in the same directory + rename so a crash mid-
+ * write cannot leave a half-written settings.json.
+ *
+ * @param {{ model?: string | null, effortLevel?: string | null, env?: NodeJS.ProcessEnv }} options
+ * @returns {{ path: string, applied: { model?: string, effortLevel?: string }, before: { model: string|null, effortLevel: string|null } }}
+ */
+export function writeCopilotDefaults({ model = null, effortLevel = null, env = process.env } = {}) {
+  const trimmedModel = typeof model === "string" ? model.trim() : "";
+  const normalizedEffort = normalizeEffortForSettings(effortLevel);
+  // Validate effort first: a non-empty `extreme` is a clearer error than the
+  // generic "must provide one of..." message that would otherwise fire when
+  // it normalizes to null.
+  if (typeof effortLevel === "string" && effortLevel.trim() && !normalizedEffort) {
+    throw new Error(
+      `Invalid --default-effort value "${effortLevel}". Expected one of: low, medium, high, xhigh (none/minimal collapse to low).`
+    );
+  }
+  if (!trimmedModel && !normalizedEffort) {
+    throw new Error("writeCopilotDefaults: at least one of model or effortLevel must be provided.");
+  }
+
+  const home = resolveCopilotHome(env);
+  fs.mkdirSync(home, { recursive: true });
+  const settingsPath = path.join(home, "settings.json");
+
+  // Preserve any leading // comment block by extracting it before parse and
+  // re-emitting it on write. Anything more exotic (block comments, inline
+  // comments) is not preserved — settings.json in the wild does not appear
+  // to use either form.
+  let leadingComments = "";
+  let body = {};
+  if (fs.existsSync(settingsPath)) {
+    const raw = fs.readFileSync(settingsPath, "utf8");
+    const commentMatch = raw.match(/^(\s*\/\/[^\n]*\n)+/);
+    if (commentMatch) {
+      leadingComments = commentMatch[0];
+    }
+    try {
+      body = parseJsonWithLineComments(raw) ?? {};
+    } catch {
+      // Refuse to overwrite a file we can't parse — better to surface an
+      // error than to silently nuke whatever shape the user's settings.json
+      // is in. The caller can hand-edit and retry.
+      throw new Error(
+        `Refusing to overwrite ${settingsPath}: existing file does not parse as JSON. Fix or remove it manually first.`
+      );
+    }
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      throw new Error(
+        `Refusing to overwrite ${settingsPath}: top-level must be a JSON object, got ${Array.isArray(body) ? "array" : typeof body}.`
+      );
+    }
+  }
+
+  const before = {
+    model: typeof body.model === "string" ? body.model : null,
+    effortLevel: typeof body.effortLevel === "string" ? body.effortLevel : null
+  };
+  const applied = {};
+
+  if (trimmedModel) {
+    body.model = trimmedModel;
+    applied.model = trimmedModel;
+  }
+  if (normalizedEffort) {
+    body.effortLevel = normalizedEffort;
+    applied.effortLevel = normalizedEffort;
+  }
+
+  const json = `${JSON.stringify(body, null, 2)}\n`;
+  const out = leadingComments ? `${leadingComments}${json}` : json;
+
+  // Atomic write: same-dir temp + rename. Same-dir keeps rename on the same
+  // filesystem volume, which is required for atomicity on POSIX and avoids
+  // EXDEV on Windows when settings.json lives on a different drive than tmp.
+  const tempPath = path.join(home, `.settings.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tempPath, out, { encoding: "utf8", mode: 0o600 });
+  try {
+    fs.renameSync(tempPath, settingsPath);
+  } catch (error) {
+    try {
+      fs.unlinkSync(tempPath);
+    } catch {
+      /* best effort */
+    }
+    throw error;
+  }
+
+  return { path: settingsPath, applied, before };
 }
 
 function buildAuthStatus(fields = {}) {
@@ -789,6 +1003,20 @@ function buildCliResult({ exit, threadId, model, stdout, stderr, error }) {
 
 export async function runAppServerTurn(cwd, options = {}) {
   ensureCopilotAvailable(cwd, { env: options.env });
+
+  // Echo the model + effort that the upcoming call will actually use, so the
+  // user can confirm whether they're getting their settings.json default
+  // (e.g. gpt-5.5) or an override from --model. Goes to stderr to keep the
+  // task command's verbatim stdout contract intact. Suppress for the Stop
+  // gate review (a hooks-driven background call) where stderr is not user-
+  // visible and would just clutter logs.
+  if (!options.suppressActiveModelEcho) {
+    const activeInfo = getActiveCopilotModelInfo({
+      requestedModel: options.model ?? null,
+      env: options.env ?? process.env
+    });
+    process.stderr.write(`[copilot] Using model: ${formatActiveModelLine(activeInfo)}\n`);
+  }
 
   // When the caller pins a per-call --model, route through the one-shot CLI
   // fallback. Resume is incompatible with this path (the CLI one-shot cannot

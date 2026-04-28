@@ -22,6 +22,11 @@ test("review command uses AskUserQuestion + background Bash and stays review-onl
   assert.match(source, /```typescript/);
   assert.match(source, /review "\$ARGUMENTS"/);
   assert.match(source, /\[--scope auto\|working-tree\|branch\]/);
+  // --model and --effort must appear in the hint so users discover that
+  // per-call model overrides are supported on review (regression for #54
+  // — they were backend-supported but never surfaced in the hint).
+  assert.match(source, /\[--model <name>\]/);
+  assert.match(source, /\[--effort <none\|minimal\|low\|medium\|high\|xhigh>\]/);
   assert.match(source, /run_in_background:\s*true/);
   assert.match(source, /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/copilot-companion\.mjs" review "\$ARGUMENTS"/);
   assert.match(source, /description:\s*"Copilot review"/);
@@ -37,7 +42,10 @@ test("adversarial-review command mirrors review structure with focus text allowe
   const source = read("commands/adversarial-review.md");
   assert.match(source, /AskUserQuestion/);
   assert.match(source, /adversarial-review "\$ARGUMENTS"/);
-  assert.match(source, /\[--scope auto\|working-tree\|branch\] \[focus \.\.\.\]/);
+  assert.match(source, /\[--scope auto\|working-tree\|branch\]/);
+  assert.match(source, /\[focus \.\.\.\]/);
+  assert.match(source, /\[--model <name>\]/);
+  assert.match(source, /\[--effort <none\|minimal\|low\|medium\|high\|xhigh>\]/);
   assert.match(source, /description:\s*"Copilot adversarial review"/);
   assert.match(source, /uses the same review target selection as `\/copilot:review`/i);
   assert.match(source, /can still take extra focus text after the flags/i);
@@ -137,7 +145,9 @@ test("setup command offers Copilot install and points users to copilot login", (
   const setup = read("commands/setup.md");
   const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
 
-  assert.match(setup, /argument-hint:\s*'\[--enable-review-gate\|--disable-review-gate\]'/);
+  assert.match(setup, /--enable-review-gate\|--disable-review-gate/);
+  assert.match(setup, /--default-model <name\|alias>/);
+  assert.match(setup, /--default-effort <low\|medium\|high\|xhigh>/);
   assert.match(setup, /AskUserQuestion/);
   assert.match(setup, /npm install -g @github\/copilot/);
   assert.match(setup, /copilot-companion\.mjs" setup --json \$ARGUMENTS/);

@@ -11,6 +11,8 @@ import {
     buildPersistentTaskThreadName,
     DEFAULT_CONTINUE_PROMPT,
     findLatestTaskThread,
+    formatActiveModelLine,
+    getActiveCopilotModelInfo,
     getCopilotAuthStatus,
     getCopilotAvailability,
     getSessionRuntimeStatus,
@@ -18,7 +20,8 @@ import {
     isModelUnavailableStderr,
     parseStructuredOutput,
     probeModelAvailability,
-    runAppServerTurn
+    runAppServerTurn,
+    writeCopilotDefaults
   } from "./lib/copilot.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
@@ -87,10 +90,24 @@ const MODEL_ALIASES = new Map([
   ["sonnet", "claude-sonnet-4.6"],
   ["haiku", "claude-haiku-4.5"],
   ["gpt", "gpt-5.4"],
-  ["codex", "gpt-5.3-codex"]
+  ["codex", "gpt-5.3-codex"],
+  // `auto` lets Copilot pick the best model per prompt (GA 2026-04-17). It's
+  // a literal Copilot model identifier, not a plugin invention, so the alias
+  // is just a self-passthrough; we list it explicitly so the value validates
+  // through normalizeRequestedModel rather than getting flagged as unknown.
+  ["auto", "auto"]
 ]);
-// Copilot CLI has no per-call reasoning-effort knob. We translate the
-// codex-plugin-cc `--effort` levels into a matching model choice.
+// Historically Copilot CLI had no per-call reasoning-effort knob, so the
+// plugin translated `--effort` levels into a matching model choice. Copilot
+// CLI 1.0.11+ added a real `--effort` flag (low/medium/high/xhigh), but we
+// keep this mapping for two reasons:
+//   1. Older Copilot CLI versions still in the field don't accept --effort
+//      and would error out if we passed it through.
+//   2. The plugin exposes "none" and "minimal" tiers (codex-plugin-cc
+//      parity) that Copilot's own --effort flag doesn't recognize.
+// A future change should detect Copilot CLI version and prefer the native
+// --effort flag when available, dropping this mapping for everything except
+// the "none"/"minimal" → "low" collapse.
 const EFFORT_TO_MODEL = new Map([
   ["none", "claude-opus-4.6-fast"],
   ["minimal", "claude-opus-4.6-fast"],
@@ -301,6 +318,8 @@ async function buildSetupReport(cwd, actionsTaken = [], options = {}) {
     }
   }
 
+  const activeModel = getActiveCopilotModelInfo({ env: process.env });
+
   return {
     ready: nodeStatus.available && copilotStatus.available && authStatus.loggedIn,
     node: nodeStatus,
@@ -309,6 +328,10 @@ async function buildSetupReport(cwd, actionsTaken = [], options = {}) {
     auth: authStatus,
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
+    activeModel: {
+      ...activeModel,
+      label: formatActiveModelLine(activeModel)
+    },
     actionsTaken,
     nextSteps,
     modelProbe
@@ -317,7 +340,7 @@ async function buildSetupReport(cwd, actionsTaken = [], options = {}) {
 
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["cwd"],
+    valueOptions: ["cwd", "default-model", "default-effort"],
     booleanOptions: [
       "json",
       "enable-review-gate",
@@ -340,6 +363,40 @@ async function handleSetup(argv) {
   } else if (options["disable-review-gate"]) {
     setConfig(workspaceRoot, "stopReviewGate", false);
     actionsTaken.push(`Disabled the stop-time review gate for ${workspaceRoot}.`);
+  }
+
+  // --default-model / --default-effort write into ~/.copilot/settings.json so
+  // the change is respected by every Copilot client (this plugin's broker,
+  // direct `copilot` invocations, and other tools that read the same file).
+  // We resolve plugin aliases (gpt → gpt-5.4, etc.) before persisting so the
+  // file holds Copilot's canonical model identifier rather than the alias.
+  const requestedDefaultModelRaw = options["default-model"];
+  const requestedDefaultEffort = options["default-effort"];
+  if (requestedDefaultModelRaw || requestedDefaultEffort) {
+    const resolvedModel = requestedDefaultModelRaw
+      ? normalizeRequestedModel(requestedDefaultModelRaw)
+      : null;
+    if (requestedDefaultModelRaw && !resolvedModel) {
+      throw new Error("--default-model requires a non-empty value.");
+    }
+    const result = writeCopilotDefaults({
+      model: resolvedModel,
+      effortLevel: requestedDefaultEffort ?? null
+    });
+    if (result.applied.model) {
+      const aliasNote =
+        requestedDefaultModelRaw && requestedDefaultModelRaw !== result.applied.model
+          ? ` (alias ${requestedDefaultModelRaw} → ${result.applied.model})`
+          : "";
+      actionsTaken.push(`Set default model to ${result.applied.model}${aliasNote} in ${result.path}.`);
+    }
+    if (result.applied.effortLevel) {
+      const collapseNote =
+        requestedDefaultEffort && requestedDefaultEffort.toLowerCase() !== result.applied.effortLevel
+          ? ` (collapsed ${requestedDefaultEffort} → ${result.applied.effortLevel})`
+          : "";
+      actionsTaken.push(`Set default effortLevel to ${result.applied.effortLevel}${collapseNote} in ${result.path}.`);
+    }
   }
 
   const finalReport = await buildSetupReport(cwd, actionsTaken, {

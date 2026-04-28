@@ -1,6 +1,6 @@
 ---
 description: Run a Copilot review that challenges the implementation approach and design choices
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [focus ...]'
+argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <name>] [--effort <none|minimal|low|medium|high|xhigh>] [focus ...]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -43,6 +43,7 @@ Argument handling:
 - It supports working-tree review, branch review, and `--base <ref>`.
 - It does not support `--scope staged` or `--scope unstaged`.
 - Unlike `/copilot:review`, it can still take extra focus text after the flags.
+- `--model` and `--effort` are runtime-selection flags. Preserve them so the companion can override the user's `~/.copilot/settings.json` default for this single review. Leave both unset unless the user explicitly asks.
 
 Foreground flow:
 - Run:
