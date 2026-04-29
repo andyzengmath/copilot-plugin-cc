@@ -66,18 +66,24 @@ test("setup --probe-models reports every model as ok when all are available", ()
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   assert.match(result.stdout, /Model availability \(--probe-models\)/);
-  assert.match(result.stdout, /- claude-opus-4\.6-fast: ok/);
+  // v0.0.16: COMMON_PROBE_MODELS replaces the old EFFORT_TO_MODEL-derived
+  // list. The 7 entries are the most common per-call --model targets users
+  // pass; the list is hand-maintained against the Copilot model catalog.
+  assert.match(result.stdout, /- claude-opus-4\.7: ok/);
   assert.match(result.stdout, /- claude-sonnet-4\.6: ok/);
-  assert.match(result.stdout, /- claude-opus-4\.6: ok/);
   assert.match(result.stdout, /- claude-haiku-4\.5: ok/);
+  assert.match(result.stdout, /- claude-opus-4\.6-fast: ok/);
+  assert.match(result.stdout, /- gpt-5\.5: ok/);
+  assert.match(result.stdout, /- gpt-5\.4: ok/);
+  assert.match(result.stdout, /- gpt-5\.3-codex: ok/);
 
   const entries = fs.readFileSync(spawnLog, "utf8")
     .split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const probeSpawns = entries.filter((entry) => entry.argv.includes("-p"));
   assert.equal(
     probeSpawns.length,
-    4,
-    "one probe spawn per unique model across EFFORT_TO_MODEL + EFFORT_FALLBACK_CHAIN"
+    7,
+    "one probe spawn per entry in COMMON_PROBE_MODELS"
   );
   const probedModels = probeSpawns.map((entry) => {
     const modelIdx = entry.argv.indexOf("--model");
@@ -85,7 +91,15 @@ test("setup --probe-models reports every model as ok when all are available", ()
   });
   assert.deepEqual(
     probedModels.sort(),
-    ["claude-haiku-4.5", "claude-opus-4.6", "claude-opus-4.6-fast", "claude-sonnet-4.6"]
+    [
+      "claude-haiku-4.5",
+      "claude-opus-4.6-fast",
+      "claude-opus-4.7",
+      "claude-sonnet-4.6",
+      "gpt-5.3-codex",
+      "gpt-5.4",
+      "gpt-5.5"
+    ]
   );
 });
 
@@ -96,7 +110,7 @@ test("setup --probe-models marks account-unavailable models correctly", () => {
     ["setup", "--probe-models"],
     {
       pluginData,
-      script: pingScript({ unavailableModels: ["claude-opus-4.6"] })
+      script: pingScript({ unavailableModels: ["claude-opus-4.7"] })
     }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
@@ -104,21 +118,20 @@ test("setup --probe-models marks account-unavailable models correctly", () => {
   // availability line with its Copilot-CLI-style error as the detail.
   assert.match(result.stdout, /- claude-sonnet-4\.6: ok/);
   assert.match(result.stdout, /- claude-opus-4\.6-fast: ok/);
-  assert.match(result.stdout, /- claude-opus-4\.6: unavailable/);
-  assert.match(result.stdout, /model claude-opus-4\.6 is not available/);
-  // Next steps should flag the unavailability and remind users that
-  // --effort will auto-fall-back.
+  assert.match(result.stdout, /- claude-opus-4\.7: unavailable/);
+  assert.match(result.stdout, /model claude-opus-4\.7 is not available/);
+  // v0.0.16: nextSteps prompt was rewritten now that effort tiers no longer
+  // map to specific models.
   assert.match(
     result.stdout,
-    /--effort tiers are unavailable[\s\S]*claude-opus-4\.6/i
+    /These models are unavailable on this account[\s\S]*claude-opus-4\.7/i
   );
 });
 
-test("setup --probe-models surfaces claude-haiku-4.5 in nextSteps when it is the only unavailable tier", () => {
-  // Regression guard: haiku-4.5 was added in v0.10 as the tail of the
-  // medium/high fallback chains. If the probe's model-union ever drops
-  // fallback-chain entries, haiku availability would silently disappear
-  // from --probe-models output and this test would catch it.
+test("setup --probe-models surfaces claude-haiku-4.5 in nextSteps when it is the only unavailable model", () => {
+  // Haiku still appears in COMMON_PROBE_MODELS as a low-cost tier users
+  // commonly fall back to via --model. If a future tweak silently drops
+  // it from the probe list, this test catches it.
   const pluginData = makeTempDir();
 
   const result = runCompanion(
@@ -129,14 +142,14 @@ test("setup --probe-models surfaces claude-haiku-4.5 in nextSteps when it is the
     }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  assert.match(result.stdout, /- claude-opus-4\.6: ok/);
+  assert.match(result.stdout, /- claude-opus-4\.7: ok/);
   assert.match(result.stdout, /- claude-sonnet-4\.6: ok/);
   assert.match(result.stdout, /- claude-opus-4\.6-fast: ok/);
   assert.match(result.stdout, /- claude-haiku-4\.5: unavailable/);
   assert.match(
     result.stdout,
-    /--effort tiers are unavailable[\s\S]*claude-haiku-4\.5/i,
-    "nextSteps must name claude-haiku-4.5 as the unavailable tier"
+    /These models are unavailable on this account[\s\S]*claude-haiku-4\.5/i,
+    "nextSteps must name claude-haiku-4.5 as unavailable"
   );
 });
 
@@ -147,14 +160,14 @@ test("setup --probe-models JSON output includes modelProbe array", () => {
     ["setup", "--probe-models", "--json"],
     {
       pluginData,
-      script: pingScript({ unavailableModels: ["claude-opus-4.6"] })
+      script: pingScript({ unavailableModels: ["claude-opus-4.7"] })
     }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   const report = JSON.parse(result.stdout);
   assert.ok(Array.isArray(report.modelProbe));
-  assert.equal(report.modelProbe.length, 4);
-  const opus = report.modelProbe.find((r) => r.model === "claude-opus-4.6");
+  assert.equal(report.modelProbe.length, 7);
+  const opus = report.modelProbe.find((r) => r.model === "claude-opus-4.7");
   assert.equal(opus.available, false);
   assert.match(opus.detail, /not available/);
   const sonnet = report.modelProbe.find((r) => r.model === "claude-sonnet-4.6");

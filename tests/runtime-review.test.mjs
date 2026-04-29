@@ -204,90 +204,10 @@ function readSpawnLog(spawnLogPath) {
     .map((line) => JSON.parse(line));
 }
 
-test("review --effort high falls back to --model claude-sonnet-4.6 when claude-opus-4.6 is unavailable", () => {
-  const pluginData = makeTempDir();
-  const repo = seedDirtyRepo();
-  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
-
-  const result = runCompanion(
-    repo,
-    ["review", "--effort", "high"],
-    {
-      pluginData,
-      script: {
-        ...scriptedJsonReview({
-          verdict: "approve",
-          summary: "sonnet-level review ok",
-          findings: [],
-          next_steps: []
-        }),
-        unavailableModels: ["claude-opus-4.6"]
-      },
-      spawnLog
-    }
-  );
-  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  assert.match(result.stdout, /Verdict: approve/);
-  assert.match(
-    result.stderr,
-    /claude-opus-4\.6.*unavailable.*retrying.*claude-sonnet-4\.6.*fallback chain/i,
-    `expected fallback notice on stderr; got: ${result.stderr}`
-  );
-  const entries = readSpawnLog(spawnLog);
-  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
-  assert.equal(
-    cliEntries.length,
-    2,
-    `expected two -p invocations (opus → sonnet); got ${cliEntries.length}`
-  );
-  const firstModel = cliEntries[0].argv[cliEntries[0].argv.indexOf("--model") + 1];
-  const secondModel = cliEntries[1].argv[cliEntries[1].argv.indexOf("--model") + 1];
-  assert.equal(firstModel, "claude-opus-4.6");
-  assert.equal(secondModel, "claude-sonnet-4.6");
-});
-
-test("review --effort high with explicit --model opus does NOT auto-fallback", () => {
-  const pluginData = makeTempDir();
-  const repo = seedDirtyRepo();
-  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
-
-  const result = runCompanion(
-    repo,
-    ["review", "--effort", "high", "--model", "opus"],
-    {
-      pluginData,
-      script: {
-        ...scriptedJsonReview({
-          verdict: "approve",
-          summary: "never seen",
-          findings: [],
-          next_steps: []
-        }),
-        // v0.11 refresh: `opus` alias now resolves to claude-opus-4.7,
-        // so the fixture must unavailable-list the resolved target.
-        unavailableModels: ["claude-opus-4.7"]
-      },
-      spawnLog
-    }
-  );
-  assert.notEqual(result.status, 0);
-  // --effort-ignored-because-of-model notice fires (shared with the task path);
-  // but no retry notice, because the user explicitly picked the model.
-  assert.match(
-    result.stderr,
-    /--effort high is ignored because --model claude-opus-4\.7 was also passed/
-  );
-  assert.doesNotMatch(
-    result.stderr,
-    /appears unavailable on this account.*retrying/i,
-    `explicit --model must not trigger fallback; stderr was: ${result.stderr}`
-  );
-  const entries = readSpawnLog(spawnLog);
-  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
-  assert.equal(cliEntries.length, 1, "explicit --model should produce exactly one spawn attempt");
-});
-
-test("review --effort high with opus available does not retry", () => {
+test("review --effort high passes --effort=high to the per-call CLI without forcing a --model", () => {
+  // v0.0.16: review path mirrors task path. --effort flows through to
+  // Copilot CLI's native --effort flag (1.0.11+) and the user's
+  // settings.json default model is preserved (no --model override).
   const pluginData = makeTempDir();
   const repo = seedDirtyRepo();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
@@ -307,11 +227,47 @@ test("review --effort high with opus available does not retry", () => {
     }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  const entries = readSpawnLog(spawnLog);
-  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
-  assert.equal(cliEntries.length, 1, "no fallback expected when primary model succeeds");
-  const modelIdx = cliEntries[0].argv.indexOf("--model");
-  assert.equal(cliEntries[0].argv[modelIdx + 1], "claude-opus-4.6");
+  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 1, "exactly one spawn — no fallback chain");
+  const argv = cliEntries[0].argv;
+  const effortIdx = argv.indexOf("--effort");
+  assert.ok(
+    effortIdx >= 0 && argv[effortIdx + 1] === "high",
+    `expected --effort high; got ${JSON.stringify(argv)}`
+  );
+  assert.ok(
+    !argv.includes("--model"),
+    `--effort alone must not force a --model override; got ${JSON.stringify(argv)}`
+  );
+});
+
+test("review --model opus + --effort high passes both flags through to the CLI", () => {
+  const pluginData = makeTempDir();
+  const repo = seedDirtyRepo();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+
+  const result = runCompanion(
+    repo,
+    ["review", "--effort", "high", "--model", "opus"],
+    {
+      pluginData,
+      script: scriptedJsonReview({
+        verdict: "approve",
+        summary: "opus + high ok",
+        findings: [],
+        next_steps: []
+      }),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  // No "--effort ignored" notice — Copilot CLI 1.0.11+ accepts both.
+  assert.doesNotMatch(result.stderr, /--effort.*is ignored because --model/);
+  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 1, "exactly one spawn — no fallback");
+  const argv = cliEntries[0].argv;
+  assert.equal(argv[argv.indexOf("--model") + 1], "claude-opus-4.7");
+  assert.equal(argv[argv.indexOf("--effort") + 1], "high");
 });
 
 test("review persists a job record with copilotSessionId after completion", () => {

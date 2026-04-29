@@ -5,6 +5,54 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.16
+
+Closes the v0.0.15 user-reported bug: setting `model: "gpt-5.5"` in
+`~/.copilot/settings.json` should mean every plugin command uses
+GPT-5.5, but `--effort high` was silently overriding it with
+`claude-opus-4.6` because the plugin mapped reasoning-effort to a
+specific Claude model. Copilot CLI 1.0.11+ has its own native
+`--effort` flag now, so the plugin's mapping was double-counting.
+
+Changed:
+- `--effort` now passes straight through to Copilot CLI's native
+  `--effort=<low|medium|high|xhigh>` flag (1.0.11+ required). The
+  plugin's `none`/`minimal` aliases still collapse to `low` at spawn
+  time for codex-plugin-cc command parity.
+- `--model` and `--effort` can be passed together; both flags forward
+  verbatim and Copilot's runtime applies them independently. The old
+  "--effort ignored because --model was passed" stderr notice is gone.
+- When `--effort` is set without `--model`, the per-call CLI omits
+  `--model` entirely so the user's `~/.copilot/settings.json` default
+  model is preserved.
+- On `--resume-last`, per-call `--model` and `--effort` are dropped
+  together with a single combined stderr notice. (Broker holds the
+  session and cannot switch either mid-turn.)
+- `/copilot:setup --probe-models` now probes a fixed list
+  (`COMMON_PROBE_MODELS`: 7 entries spanning Claude and GPT)
+  instead of the now-removed `EFFORT_TO_MODEL` derivation.
+
+Removed:
+- `EFFORT_TO_MODEL`, `EFFORT_FALLBACK_CHAIN`, `applyEffortFallbackModel`,
+  `buildEffortModelChain`. Net -311 LOC across source + tests. The
+  multi-tier model-availability fallback chain is gone — Copilot's own
+  error surfaces directly when a model isn't available on the account.
+
+Fixed:
+- `writeCopilotDefaults` (added in v0.0.15) used `Date.now()` as part
+  of its temp filename, which could collide for two callers in the
+  same millisecond (CI / parallel-test scenarios). Switched to
+  `crypto.randomUUID()`. Caught by the soliton review of PR #54.
+
+Tests:
+- Rewrote 6 existing `--effort` tests to assert the new
+  flag-passthrough behavior. Deleted 6 fallback-chain tests (behavior
+  removed). Added 1 test for "single spawn, no chain". Updated
+  `tests/setup-probe.test.mjs` for the new probe list.
+- Full suite: 165/169 pass. The 3 remaining failures are pre-existing
+  `resolveStateDir` / `status` issues on the OneDrive Windows
+  workspace, unrelated to this release.
+
 ## 0.0.15
 
 This release surfaces which Copilot model the plugin actually uses,

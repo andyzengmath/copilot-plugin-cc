@@ -577,7 +577,14 @@ export function writeCopilotDefaults({ model = null, effortLevel = null, env = p
   // Atomic write: same-dir temp + rename. Same-dir keeps rename on the same
   // filesystem volume, which is required for atomicity on POSIX and avoids
   // EXDEV on Windows when settings.json lives on a different drive than tmp.
-  const tempPath = path.join(home, `.settings.${process.pid}.${Date.now()}.tmp`);
+  //
+  // The temp suffix uses crypto.randomUUID() (not Date.now()) so two callers
+  // racing in the same millisecond — e.g. parallel test runs in the same
+  // process or a retry fired without awaiting — never compute the same path.
+  // crypto is already imported at the top of this file. Soliton review of
+  // PR #54 flagged the previous Date.now() variant as a concurrent-call
+  // collision risk on Windows CI.
+  const tempPath = path.join(home, `.settings.${process.pid}.${crypto.randomUUID()}.tmp`);
   fs.writeFileSync(tempPath, out, { encoding: "utf8", mode: 0o600 });
   try {
     fs.renameSync(tempPath, settingsPath);
@@ -871,7 +878,12 @@ async function runCopilotCli(cwd, options = {}) {
     throw new Error("A prompt is required for this Copilot run.");
   }
 
-  const model = String(options.model);
+  // model and effort are independent — either, both, or neither may be set.
+  // Neither would normally route through the broker (runAppServerTurn checks
+  // before dispatching here), but tolerate it defensively so direct callers
+  // don't get a confusing error.
+  const model = options.model ? String(options.model) : null;
+  const effort = options.effort ? String(options.effort) : null;
   const [bin, ...preArgs] = resolveCopilotCommand(env);
   const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
   const shell =
@@ -885,7 +897,8 @@ async function runCopilotCli(cwd, options = {}) {
   // valid content that will never hit a shell.
   if (shell) {
     assertNoShellMetachars(prompt, "prompt");
-    assertNoShellMetachars(model, "--model value");
+    if (model) assertNoShellMetachars(model, "--model value");
+    if (effort) assertNoShellMetachars(effort, "--effort value");
     assertNoShellMetachars(cwd, "working directory");
   }
   const args = [
@@ -895,15 +908,25 @@ async function runCopilotCli(cwd, options = {}) {
     "--allow-all-tools",
     "--allow-all-paths",
     "--add-dir",
-    cwd,
-    "--model",
-    model
+    cwd
   ];
+  if (model) {
+    args.push("--model", model);
+  }
+  if (effort) {
+    args.push("--effort", effort);
+  }
 
   const threadId = `cli-${crypto.randomUUID()}`;
+  const flagSummary = [
+    model ? `--model ${model}` : null,
+    effort ? `--effort ${effort}` : null
+  ]
+    .filter(Boolean)
+    .join(" ");
   emitProgress(
     options.onProgress,
-    `Starting Copilot CLI (--model ${model}).`,
+    flagSummary ? `Starting Copilot CLI (${flagSummary}).` : "Starting Copilot CLI.",
     "starting",
     { threadId }
   );
@@ -1018,16 +1041,27 @@ export async function runAppServerTurn(cwd, options = {}) {
     process.stderr.write(`[copilot] Using model: ${formatActiveModelLine(activeInfo)}\n`);
   }
 
-  // When the caller pins a per-call --model, route through the one-shot CLI
-  // fallback. Resume is incompatible with this path (the CLI one-shot cannot
+  // When the caller pins per-call --model or --effort, route through the
+  // one-shot CLI. Copilot CLI 1.0.11+ honors both flags independently, and
+  // the broker (one shared `copilot --acp` per Claude session) can't switch
+  // either mid-turn — its model/effort were fixed at spawn time.
+  //
+  // Resume is incompatible with the one-shot path (the CLI one-shot cannot
   // load a broker-held sessionId), so a resume request stays on the broker
-  // and we surface a note that --model was dropped.
-  if (options.model && !options.resumeThreadId) {
+  // and we surface a stderr note that the per-call overrides were dropped.
+  const wantsOneShot = options.model || options.effort;
+  if (wantsOneShot && !options.resumeThreadId) {
     return runCopilotCli(cwd, options);
   }
-  if (options.model && options.resumeThreadId) {
+  if (wantsOneShot && options.resumeThreadId) {
+    const dropped = [
+      options.model ? `--model ${options.model}` : null,
+      options.effort ? `--effort ${options.effort}` : null
+    ]
+      .filter(Boolean)
+      .join(" + ");
     process.stderr.write(
-      `[copilot] --model ${options.model} is ignored when --resume/--resume-last is used; Copilot CLI cannot switch models on a resumed broker session.\n`
+      `[copilot] ${dropped} ignored when --resume/--resume-last is used; Copilot CLI cannot switch model or effort on a resumed broker session.\n`
     );
   }
 
