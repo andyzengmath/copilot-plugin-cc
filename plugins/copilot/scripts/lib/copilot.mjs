@@ -1030,16 +1030,12 @@ export async function runAppServerTurn(cwd, options = {}) {
   // Echo the model + effort that the upcoming call will actually use, so the
   // user can confirm whether they're getting their settings.json default
   // (e.g. gpt-5.5) or an override from --model. Goes to stderr to keep the
-  // task command's verbatim stdout contract intact. Suppress for the Stop
-  // gate review (a hooks-driven background call) where stderr is not user-
-  // visible and would just clutter logs.
-  if (!options.suppressActiveModelEcho) {
-    const activeInfo = getActiveCopilotModelInfo({
-      requestedModel: options.model ?? null,
-      env: options.env ?? process.env
-    });
-    process.stderr.write(`[copilot] Using model: ${formatActiveModelLine(activeInfo)}\n`);
-  }
+  // task command's verbatim stdout contract intact.
+  const activeInfo = getActiveCopilotModelInfo({
+    requestedModel: options.model ?? null,
+    env: options.env ?? process.env
+  });
+  process.stderr.write(`[copilot] Using model: ${formatActiveModelLine(activeInfo)}\n`);
 
   // When the caller pins per-call --model or --effort, route through the
   // one-shot CLI. Copilot CLI 1.0.11+ honors both flags independently, and
