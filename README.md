@@ -118,37 +118,59 @@ Flags: `--background`, `--wait`, `--resume`, `--fresh`, `--model <name>`, `--eff
 
 **Model aliases**: `fast` → `claude-opus-4.6-fast`, `opus` →
 `claude-opus-4.7`, `sonnet` → `claude-sonnet-4.6`, `haiku` →
-`claude-haiku-4.5`, `gpt` → `gpt-5.4`, `codex` → `gpt-5.3-codex`.
+`claude-haiku-4.5`, `gpt` → `gpt-5.4`, `codex` → `gpt-5.3-codex`,
+`auto` → Copilot's auto-model-selection (GA 2026-04-17).
 Any concrete Copilot model name works too — e.g.
-`--model claude-opus-4.6` or `--model gpt-5.1-codex-max` or
+`--model claude-opus-4.6` or `--model gpt-5.5` or
 `--model gpt-5.4-mini` — even if it doesn't have a short alias.
 
 > Note: `claude-opus-4.7` currently sits at a 7.5x Copilot premium-
 > request multiplier (through 2026-04-30). The `opus` alias tracks
 > it anyway; type `--model claude-opus-4.6` explicitly if you need
-> the pre-4.7 billing rate. The `--effort high` default (below)
-> intentionally stays on `claude-opus-4.6` so automated flows that
-> use `--effort` don't change their per-call cost without an
-> explicit user decision.
+> the pre-4.7 billing rate.
 
-**Effort → model mapping**: Copilot CLI has no per-call reasoning knob, so
-`--effort` is translated:
+**`--effort`** passes straight through to Copilot CLI's native
+`--effort=<low|medium|high|xhigh>` flag (Copilot CLI 1.0.11+). The
+plugin's `none`/`minimal` aliases collapse to `low` at spawn time
+for codex-plugin-cc command parity. When `--effort` is set without
+`--model`, the user's default model from
+[`~/.copilot/settings.json`](#default-model--effort) is preserved
+— effort and model are independent knobs.
 
-| `--effort`                | Model                  | Fallback chain on unavailability                                         |
-|---------------------------|------------------------|--------------------------------------------------------------------------|
-| `none`, `minimal`, `low`  | `claude-opus-4.6-fast` | _(already lowest tier)_                                                  |
-| `medium` (default)        | `claude-sonnet-4.6`    | `claude-opus-4.6-fast` → `claude-haiku-4.5`                              |
-| `high`, `xhigh`           | `claude-opus-4.6`      | `claude-sonnet-4.6` → `claude-opus-4.6-fast` → `claude-haiku-4.5`        |
+`--model` and `--effort` can be passed together; both flow through
+verbatim and Copilot's runtime applies them independently. There is
+no longer an "either/or" override: in v0.0.16 the plugin dropped the
+internal effort-to-model mapping that used to silently force a Claude
+model whenever `--effort` was set.
 
-If the primary effort-mapped model isn't available on your Copilot
-account, the plugin automatically retries down the chain and surfaces a
-stderr notice showing which tier it landed on. Explicit `--model X`
-never triggers the fallback — your picked model is used as-is. The
-same fallback chain applies to `/copilot:task`, `/copilot:review`, and
-`/copilot:adversarial-review`.
+### Default model + effort
 
-If you pass both `--model` and `--effort`, `--model` wins and `--effort` is
-logged as a no-op.
+The plugin reads its default model and reasoning effort from
+`~/.copilot/settings.json` (the standard Copilot CLI settings file —
+location is `$COPILOT_HOME/settings.json` if you've set
+`COPILOT_HOME`). Selection precedence is:
+
+1. `/model` slash command inside an interactive `copilot` session
+2. `--model` / `--effort` CLI flags on the plugin command
+3. `COPILOT_MODEL` / `COPILOT_EFFORT_LEVEL` environment variables
+4. `model` / `effortLevel` keys in `~/.copilot/settings.json`
+5. Copilot CLI's built-in default (`claude-sonnet-4.5` today)
+
+The fastest way to change your default for every plugin command is:
+
+```bash
+/copilot:setup --default-model gpt-5.5 --default-effort high
+```
+
+That writes the two keys into `~/.copilot/settings.json` atomically,
+preserving leading `// ...` comments and every other key the file
+already had. After that, `/copilot:rescue`, `/copilot:review`, and
+the others will inherit GPT-5.5 + high reasoning unless a per-call
+flag overrides them.
+
+Every plugin call also emits an `[copilot] Using model: ...` line
+to stderr before doing work, so you can confirm the active model +
+effort + source on each invocation.
 
 ### `/copilot:status`, `/copilot:result`, `/copilot:cancel`
 
@@ -157,12 +179,37 @@ Copilot jobs scoped to this Claude session.
 
 ### `/copilot:setup`
 
-Checks install, ACP health, and auth state. Also toggles the optional
-stop-time review gate:
+Checks install, ACP health, and auth state. The output also shows the
+**active model** line — your inherited default model, effort, and where
+the value came from (settings.json, env, or Copilot CLI default).
+
+Toggle the optional stop-time review gate:
 
 ```bash
 /copilot:setup --enable-review-gate
 /copilot:setup --disable-review-gate
+```
+
+Persist a default model and reasoning effort into
+`~/.copilot/settings.json`:
+
+```bash
+/copilot:setup --default-model gpt-5.5
+/copilot:setup --default-effort high
+/copilot:setup --default-model auto --default-effort medium
+```
+
+Aliases (`fast`, `opus`, `sonnet`, `haiku`, `gpt`, `codex`, `auto`)
+resolve to canonical Copilot model identifiers before being written.
+The plugin's `none`/`minimal` effort tiers collapse to `low` (Copilot's
+own `effortLevel` only accepts `low`/`medium`/`high`/`xhigh`). Other
+keys in `settings.json` are preserved.
+
+Probe Copilot for model availability against a fixed list of common
+models (Claude + GPT) before you hit an availability error mid-run:
+
+```bash
+/copilot:setup --probe-models
 ```
 
 ## How it works
@@ -182,7 +229,7 @@ See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and
 the per-command porting decisions.
 
-## Status (v0.0.12)
+## Status (v0.0.16)
 
 - Core runtime, broker, companion, and hooks all ported and under test.
 - Standard and adversarial review commands share one prompt-engineered
@@ -190,14 +237,17 @@ the per-command porting decisions.
   files are the canonical review methodology; the runtime prompt
   templates include them via `{{AGENT:<name>}}` so there's no drift
   between the plugin prompt and `copilot --agent copilot-code-review`.
-- Per-call `--model` / `--effort` routing bypasses the shared ACP
-  broker and invokes `copilot -p "<prompt>" --model <model>` as a
-  one-shot subprocess. Applied uniformly across `/copilot:task`,
-  `/copilot:review`, and `/copilot:adversarial-review`. When the
-  effort-mapped model isn't available on the user's Copilot account,
-  the plugin walks the fallback chain defined in the table under
-  [`/copilot:rescue`](#copilotrescue) with a stderr notice on each
-  retry. Explicit `--model` never auto-falls-back.
+- Per-call `--model` and `--effort` flags pass straight through to
+  Copilot CLI's native flags (1.0.11+) via a one-shot
+  `copilot -p "<prompt>"` subprocess that bypasses the shared ACP
+  broker. Applied uniformly across `/copilot:rescue`, `/copilot:review`,
+  and `/copilot:adversarial-review`. The legacy effort→model mapping
+  was removed in v0.0.16 so `--effort` no longer overrides your
+  configured default model.
+- The active model + effort + source is echoed to stderr before every
+  plugin call (v0.0.15) and shown in `/copilot:setup` output. Defaults
+  can be persisted to `~/.copilot/settings.json` via
+  `/copilot:setup --default-model X --default-effort Y` (v0.0.15).
 - Multi-session broker coordination via a workspace-scoped
   `broker.lock` file (v0.0.8). Two Claude sessions starting on the
   same workspace simultaneously share one `copilot --acp` broker
@@ -209,10 +259,6 @@ the per-command porting decisions.
   (v0.0.8 + v0.0.9 tightening). Violations render as a bulleted
   `Schema violations:` section, not a short-circuited "first error"
   message.
-- `--effort` fallback chain extends through `claude-haiku-4.5` as the
-  lowest-cost last-resort tier (v0.0.10). User-facing aliases
-  (`opus`, `sonnet`, `gpt`, `codex`) track Copilot's current top-of-
-  family models (v0.0.11 + v0.0.12).
 - A conservative shell-metacharacter deny-list fires on the shell-
   enabled spawn path (Windows production with the real `.cmd`
   launcher) so user-controlled prompts can't become a cmd.exe
@@ -221,24 +267,14 @@ the per-command porting decisions.
   is skipped — safely — rather than rejecting legitimately-structured
   review prompts (XML tags, code fences).
 - Test coverage is end-to-end against a spawnable fake-ACP fixture
-  (`tests/fake-copilot.mjs`). 153 tests across runtime suites, unit
-  tests (SHELL_METACHAR_RE, isModelUnavailableStderr, prompt loader,
-  firstAllowOption, broker endpoint, schema validator, etc.), and the
-  protocol-agnostic set. CI runs on every PR on Ubuntu + Windows.
+  (`tests/fake-copilot.mjs`). 169 tests across runtime suites, unit
+  tests (SHELL_METACHAR_RE, prompt loader, firstAllowOption, broker
+  endpoint, schema validator, settings.json reader/writer, etc.) and
+  the protocol-agnostic set. CI runs on every PR on Ubuntu + Windows.
 
-All three v1.1-deferred items from the original design doc are now
-either shipped (concurrent broker reuse → v0.0.8; structured-output
-enforcement → v0.0.8) or confirmed upstream-blocked
-(per-ACP-session sandboxing). See
+See
 [`docs/plans/2026-04-20-v08-handoff.md`](docs/plans/2026-04-20-v08-handoff.md)
 for the running backlog and per-release details.
-
-All three items that this section previously listed as deferred have
-shipped: the setup-time model probe landed in v0.0.7 as
-`/copilot:setup --probe-models`; cross-Claude-session broker
-coordination landed in v0.0.8 via the workspace-scoped `broker.lock`
-(PR #28); structured-output enforcement for review JSON landed in
-v0.0.8 as the full schema walker in `validateReviewOutput` (PR #29).
 
 ## Security
 

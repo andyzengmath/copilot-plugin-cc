@@ -9,8 +9,16 @@ import { COMPANION_SCRIPT } from "./harness.mjs";
 import { resolveStateDir } from "../plugins/copilot/scripts/lib/state.mjs";
 
 function buildEnv({ sessionId, pluginData } = {}) {
+  // When the suite is invoked from inside an actual Claude Code session,
+  // CLAUDE_PLUGIN_DATA and COPILOT_COMPANION_SESSION_ID are already set in
+  // the parent shell. Spreading process.env into the spawn config would
+  // silently route the spawned companion at the user's real plugin data
+  // directory and apply the wrong session-id filter to the seeded jobs.
+  // Strip both vars first so the per-test pluginData / sessionId values
+  // (or their absence) take effect cleanly.
+  const { CLAUDE_PLUGIN_DATA: _ignoredPluginData, COPILOT_COMPANION_SESSION_ID: _ignoredSessionId, ...rest } = process.env;
   return {
-    ...process.env,
+    ...rest,
     ...(pluginData ? { CLAUDE_PLUGIN_DATA: pluginData } : {}),
     ...(sessionId ? { COPILOT_COMPANION_SESSION_ID: sessionId } : {})
   };
