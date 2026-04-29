@@ -907,6 +907,10 @@ async function runCopilotCli(cwd, options = {}) {
     prompt,
     "--allow-all-tools",
     "--allow-all-paths",
+    // Mirror the broker's `--no-ask-user`: the one-shot CLI runs through
+    // Claude Code's harness, so the agent's `ask_user` tool would have
+    // no answerer. Disable it outright instead of stalling the run.
+    "--no-ask-user",
     "--add-dir",
     cwd
   ];
