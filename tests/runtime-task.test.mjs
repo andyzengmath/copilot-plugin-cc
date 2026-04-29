@@ -85,20 +85,25 @@ test("task --background enqueues a tracked job and persists a queued record", ()
   assert.equal(job.jobClass, "task");
 });
 
-test("task with both --model and --effort emits a stderr notice that --effort was ignored", () => {
-  // Both the stderr notice (emitted by the companion CLI layer) and the
-  // subsequent --model routing (now handled by the per-call CLI fallback)
-  // are under test. Earlier versions of this test deferred the spawn-arg
-  // assertion until the broker learned to honor per-call models; v0.3 ships
-  // the per-call CLI fallback instead (see runCopilotCli in lib/copilot.mjs),
-  // so the per-call --model assertion lives in the dedicated tests below.
+test("task with both --model and --effort passes both flags through to the CLI", () => {
+  // Copilot CLI 1.0.11+ accepts --model and --effort independently. The
+  // plugin used to emit a "--effort ignored" stderr because of an internal
+  // mapping, but that mapping was dropped in v0.0.16 — both flags now flow
+  // through verbatim and Copilot's own runtime applies them.
   const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
   const result = runCompanion(
     ["task", "--model", "haiku", "--effort", "high", "work"],
-    { pluginData, script: buildScriptedPrompt("done") }
+    { pluginData, script: buildScriptedPrompt("done"), spawnLog }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  assert.match(result.stderr, /--effort high is ignored because --model claude-haiku-4.5 was also passed/);
+  assert.doesNotMatch(result.stderr, /--effort.*is ignored because --model/);
+  const cli = readSpawnLog(spawnLog).find((entry) => entry.argv.includes("-p"));
+  assert.ok(cli, "expected a -p invocation");
+  const modelIdx = cli.argv.indexOf("--model");
+  const effortIdx = cli.argv.indexOf("--effort");
+  assert.ok(modelIdx >= 0 && cli.argv[modelIdx + 1] === "claude-haiku-4.5", `expected --model claude-haiku-4.5; got ${JSON.stringify(cli.argv)}`);
+  assert.ok(effortIdx >= 0 && cli.argv[effortIdx + 1] === "high", `expected --effort high; got ${JSON.stringify(cli.argv)}`);
 });
 
 function readSpawnLog(spawnLogPath) {
@@ -194,7 +199,11 @@ test("task --model haiku bypasses the broker and passes --model claude-haiku-4.5
   assert.ok(!entries.some((entry) => entry.argv.includes("--acp")));
 });
 
-test("task --effort low routes through the per-call CLI with --model claude-opus-4.6-fast", () => {
+test("task --effort low passes --effort=low to the per-call CLI without forcing a --model", () => {
+  // v0.0.16: dropped the EFFORT_TO_MODEL mapping. --effort now flows
+  // straight through to Copilot CLI's native --effort flag (1.0.11+),
+  // and the user's settings.json default model is preserved (we don't
+  // pass --model at all).
   const pluginData = makeTempDir();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
   const result = runCompanion(
@@ -210,33 +219,64 @@ test("task --effort low routes through the per-call CLI with --model claude-opus
   const entries = readSpawnLog(spawnLog);
   const cli = entries.find((entry) => entry.argv.includes("-p"));
   assert.ok(cli, `expected a -p invocation; argvs: ${JSON.stringify(entries.map((entry) => entry.argv))}`);
-  const modelIdx = cli.argv.indexOf("--model");
+  const effortIdx = cli.argv.indexOf("--effort");
   assert.ok(
-    modelIdx >= 0 && cli.argv[modelIdx + 1] === "claude-opus-4.6-fast",
-    `expected --model claude-opus-4.6-fast; got ${JSON.stringify(cli.argv)}`
+    effortIdx >= 0 && cli.argv[effortIdx + 1] === "low",
+    `expected --effort low; got ${JSON.stringify(cli.argv)}`
+  );
+  assert.ok(
+    !cli.argv.includes("--model"),
+    `--effort alone must not force a --model override; got ${JSON.stringify(cli.argv)}`
   );
 });
 
-test("task --effort high routes through the per-call CLI with --model claude-opus-4.6", () => {
+test("task --effort high passes --effort=high to the per-call CLI without forcing a --model", () => {
   const pluginData = makeTempDir();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
   const result = runCompanion(
     ["task", "--effort", "high", "hi"],
     {
       pluginData,
-      script: buildScriptedPrompt("opus ok"),
+      script: buildScriptedPrompt("high ok"),
       spawnLog
     }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  assert.match(result.stdout, /opus ok/);
+  assert.match(result.stdout, /high ok/);
   const entries = readSpawnLog(spawnLog);
   const cli = entries.find((entry) => entry.argv.includes("-p"));
-  assert.ok(cli, `expected a -p invocation`);
-  const modelIdx = cli.argv.indexOf("--model");
+  assert.ok(cli, "expected a -p invocation");
+  const effortIdx = cli.argv.indexOf("--effort");
   assert.ok(
-    modelIdx >= 0 && cli.argv[modelIdx + 1] === "claude-opus-4.6",
-    `expected --model claude-opus-4.6; got ${JSON.stringify(cli.argv)}`
+    effortIdx >= 0 && cli.argv[effortIdx + 1] === "high",
+    `expected --effort high; got ${JSON.stringify(cli.argv)}`
+  );
+  assert.ok(
+    !cli.argv.includes("--model"),
+    `--effort alone must not force a --model override; got ${JSON.stringify(cli.argv)}`
+  );
+});
+
+test("task produces exactly one CLI spawn — no fallback chain", () => {
+  // v0.0.16 dropped the multi-tier model fallback chain. A single per-call
+  // spawn is the only attempt; if it fails, the failure surfaces directly.
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--effort", "high", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("once and done"),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
+  assert.equal(cliEntries.length, 1, "expected exactly one -p invocation; the fallback chain is gone");
+  assert.doesNotMatch(
+    result.stderr,
+    /appears unavailable on this account.*retrying/i,
+    "no retry notice should fire — fallback chain is gone"
   );
 });
 
@@ -322,147 +362,6 @@ test("task --resume-last with --model emits a stderr notice and stays on the bro
   );
 });
 
-test("task --effort high falls back to --model claude-sonnet-4.6 when claude-opus-4.6 is unavailable", () => {
-  const pluginData = makeTempDir();
-  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
-  const result = runCompanion(
-    ["task", "--effort", "high", "hi"],
-    {
-      pluginData,
-      script: {
-        ...buildScriptedPrompt("fallback ok"),
-        unavailableModels: ["claude-opus-4.6"]
-      },
-      spawnLog
-    }
-  );
-  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  assert.match(result.stdout, /fallback ok/);
-  assert.match(
-    result.stderr,
-    /claude-opus-4\.6.*unavailable.*retrying.*claude-sonnet-4\.6.*fallback chain/i,
-    `expected fallback notice on stderr; got: ${result.stderr}`
-  );
-  const entries = readSpawnLog(spawnLog);
-  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
-  assert.equal(
-    cliEntries.length,
-    2,
-    `expected exactly two -p invocations; got ${cliEntries.length}: ${JSON.stringify(cliEntries.map((e) => e.argv))}`
-  );
-  const firstModel = cliEntries[0].argv[cliEntries[0].argv.indexOf("--model") + 1];
-  const secondModel = cliEntries[1].argv[cliEntries[1].argv.indexOf("--model") + 1];
-  assert.equal(firstModel, "claude-opus-4.6");
-  assert.equal(secondModel, "claude-sonnet-4.6");
-});
-
-test("task --effort high exhausts the fallback chain when every tier is unavailable", () => {
-  const pluginData = makeTempDir();
-  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
-  const result = runCompanion(
-    ["task", "--effort", "high", "hi"],
-    {
-      pluginData,
-      script: {
-        ...buildScriptedPrompt("never seen"),
-        unavailableModels: [
-          "claude-opus-4.6",
-          "claude-sonnet-4.6",
-          "claude-opus-4.6-fast",
-          "claude-haiku-4.5"
-        ]
-      },
-      spawnLog
-    }
-  );
-  assert.notEqual(result.status, 0);
-  // Three retry notices as the chain walks opus-4.6 → sonnet-4.5 →
-  // opus-4.6-fast → haiku-4.5 and the tail-of-chain spawn surfaces
-  // the final unavailable error through the rendered failure path.
-  const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
-  assert.equal(
-    noticeMatches.length,
-    3,
-    `expected three retry notices (high → sonnet → fast → haiku); got ${noticeMatches.length}`
-  );
-  const entries = readSpawnLog(spawnLog);
-  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
-  assert.equal(cliEntries.length, 4, "expected four -p invocations across the full chain");
-});
-
-test("task --effort medium falls back to claude-haiku-4.5 when sonnet and fast are both unavailable", () => {
-  // Locks in that the v0.10 medium chain walks all the way to
-  // haiku-4.5. Without this, a regression that truncated the medium
-  // chain at fast would still pass the high-chain tests above.
-  const pluginData = makeTempDir();
-  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
-  const result = runCompanion(
-    ["task", "--effort", "medium", "hi"],
-    {
-      pluginData,
-      script: {
-        ...buildScriptedPrompt("haiku ok"),
-        unavailableModels: ["claude-sonnet-4.6", "claude-opus-4.6-fast"]
-      },
-      spawnLog
-    }
-  );
-  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  assert.match(result.stdout, /haiku ok/);
-  const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
-  assert.equal(
-    noticeMatches.length,
-    2,
-    `expected two retry notices (sonnet → fast → haiku); got ${noticeMatches.length}`
-  );
-  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
-  assert.equal(cliEntries.length, 3, "expected three -p invocations: sonnet, fast, haiku");
-  const tail = cliEntries[cliEntries.length - 1];
-  const modelIdx = tail.argv.indexOf("--model");
-  assert.equal(
-    tail.argv[modelIdx + 1],
-    "claude-haiku-4.5",
-    "tail invocation must use claude-haiku-4.5"
-  );
-});
-
-test("task --effort medium exhausts the fallback chain when every tier is unavailable", () => {
-  // Mirror of the --effort high exhaustion test for the shorter medium
-  // chain. Without this, a regression that silently shortened the
-  // medium chain would go unnoticed because the high-chain test still
-  // passes on its own (longer) chain.
-  const pluginData = makeTempDir();
-  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
-  const result = runCompanion(
-    ["task", "--effort", "medium", "hi"],
-    {
-      pluginData,
-      script: {
-        ...buildScriptedPrompt("never seen"),
-        unavailableModels: [
-          "claude-sonnet-4.6",
-          "claude-opus-4.6-fast",
-          "claude-haiku-4.5"
-        ]
-      },
-      spawnLog
-    }
-  );
-  assert.notEqual(result.status, 0);
-  const noticeMatches = result.stderr.match(/appears unavailable on this account/g) ?? [];
-  assert.equal(
-    noticeMatches.length,
-    2,
-    `expected two retry notices (sonnet → fast → haiku); got ${noticeMatches.length}`
-  );
-  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
-  assert.equal(
-    cliEntries.length,
-    3,
-    "expected three -p invocations across the full medium chain"
-  );
-});
-
 test("task --effort high with explicit --model opus does NOT auto-fallback", () => {
   const pluginData = makeTempDir();
   const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
@@ -479,17 +378,20 @@ test("task --effort high with explicit --model opus does NOT auto-fallback", () 
       spawnLog
     }
   );
-  // --model wins over --effort (the existing stderr notice still fires);
-  // because the user picked opus explicitly, no fallback happens.
+  // v0.0.16: both --model and --effort flow through verbatim. No fallback
+  // chain exists, so an unavailable model surfaces directly.
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(
     result.stderr,
     /appears unavailable on this account.*retrying/i,
-    `explicit --model must not trigger fallback; stderr was: ${result.stderr}`
+    `no fallback chain — must not retry; stderr was: ${result.stderr}`
   );
   const entries = readSpawnLog(spawnLog);
   const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
-  assert.equal(cliEntries.length, 1, "explicit --model should produce exactly one spawn attempt");
+  assert.equal(cliEntries.length, 1, "exactly one spawn — no fallback");
+  const argv = cliEntries[0].argv;
+  assert.equal(argv[argv.indexOf("--model") + 1], "claude-opus-4.7", "--model passed through");
+  assert.equal(argv[argv.indexOf("--effort") + 1], "high", "--effort passed through");
 });
 
 test("task --effort high with the primary model available does not retry", () => {
@@ -537,17 +439,16 @@ test("task --effort high non-availability failure does NOT trigger fallback", ()
   assert.equal(cliEntries.length, 1, "non-availability failures must not trigger the fallback chain");
 });
 
-test("task --resume-last --effort high collapses the fallback chain on the broker path (single attempt)", () => {
+test("task --resume-last --effort high stays on the broker path with a stderr drop notice", () => {
+  // Resume holds a broker-issued sessionId; the broker can't switch effort
+  // mid-turn, so per-call --effort is dropped with a stderr notice (mirror
+  // of the existing --model-on-resume behavior).
   const pluginData = makeTempDir();
-  // Seed a prior job so --resume-last has a threadId to resume. Broker
-  // path ignores per-call --model, so retrying down the chain would
-  // fire redundant identical calls + misleading retry notices naming
-  // models that were never actually used.
   const seed = runCompanion(
     ["task", "first"],
     {
       pluginData,
-      script: buildScriptedPrompt("seed ok", { sessionId: "sess-resume-collapse" })
+      script: buildScriptedPrompt("seed ok", { sessionId: "sess-resume-effort-drop" })
     }
   );
   assert.equal(seed.status, 0, `seed stderr: ${seed.stderr}`);
@@ -557,85 +458,21 @@ test("task --resume-last --effort high collapses the fallback chain on the broke
     ["task", "--resume-last", "--effort", "high", "continue"],
     {
       pluginData,
-      script: buildScriptedPrompt("resumed ok", { sessionId: "sess-resume-collapse" }),
+      script: buildScriptedPrompt("resumed ok", { sessionId: "sess-resume-effort-drop" }),
       spawnLog
     }
   );
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  assert.doesNotMatch(
+  assert.match(
     result.stderr,
-    /appears unavailable on this account.*retrying/i,
-    `resume+effort must not emit fallback retry notices; stderr was: ${result.stderr}`
+    /--effort high.*ignored when --resume/i,
+    `expected resume+effort drop notice; got: ${result.stderr}`
   );
-  const entries = readSpawnLog(spawnLog);
-  const cliEntries = entries.filter((entry) => entry.argv.includes("-p"));
+  const cliEntries = readSpawnLog(spawnLog).filter((entry) => entry.argv.includes("-p"));
   assert.equal(
     cliEntries.length,
     0,
-    `resume+effort must stay on the broker path; -p argv was: ${JSON.stringify(cliEntries.map((e) => e.argv))}`
-  );
-});
-
-test("task --background --effort high falls back to --model claude-sonnet-4.6 via the worker path", async () => {
-  const pluginData = makeTempDir();
-  const result = runCompanion(
-    ["task", "--background", "--effort", "high", "bg work"],
-    {
-      pluginData,
-      script: {
-        ...buildScriptedPrompt("bg fallback ok"),
-        unavailableModels: ["claude-opus-4.6"]
-      }
-    }
-  );
-  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-  assert.match(result.stdout, /started in the background/);
-
-  // Walk state to find the completed job; worker's fallback chain must
-  // fire the same way as foreground.
-  const stateRoot = path.join(pluginData, "state");
-  const workspaceEntry = fs.readdirSync(stateRoot)[0];
-  const jobsDir = path.join(stateRoot, workspaceEntry, "jobs");
-
-  // Poll until the detached worker writes terminal state (worker runs
-  // async; this integration test accepts either completed or the
-  // completed-with-fallback outcome). The worker's writeJobFile is a
-  // plain writeFileSync, so a poll that hits the file mid-write reads
-  // truncated content — tolerate partial reads by retrying rather than
-  // throwing "Unexpected end of JSON input" and failing the test on
-  // Windows where filesystem timing makes the race more frequent.
-  //
-  // Previously used a synchronous busy-spin between polls (`while
-  // (Date.now() - start < 500) {}`). Under full-suite parallel load
-  // on Windows, that tight loop actively competed for CPU with the
-  // detached worker subprocess, starving it and sometimes pushing the
-  // job past the deadline — the test flaked at the rate that
-  // --effort high fallback wall-clock plus ~3 Copilot-CLI spawn
-  // cold-starts exceeded 90 s. Switching to an async `await setTimeout`
-  // between polls releases the event loop so the worker's spawn
-  // completions and writeJobFile calls can be handled, and bumps the
-  // overall deadline to 180 s to give the three-spawn fallback path
-  // (availability probe + primary + first fallback) a safer margin
-  // on loaded Windows.
-  const deadline = Date.now() + 180000;
-  let job;
-  while (Date.now() < deadline) {
-    const jobFile = fs.readdirSync(jobsDir).find((name) => name.endsWith(".json"));
-    if (jobFile) {
-      try {
-        job = JSON.parse(fs.readFileSync(path.join(jobsDir, jobFile), "utf8"));
-        if (job.status === "completed" || job.status === "failed") break;
-      } catch {
-        // Partial write; retry next poll.
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  assert.ok(job, "expected a worker job record");
-  assert.equal(
-    job.status,
-    "completed",
-    `worker must succeed via fallback; got ${job.status} with log ${JSON.stringify(job)}`
+    `resume must stay on the broker path; -p argv was: ${JSON.stringify(cliEntries.map((e) => e.argv))}`
   );
 });
 

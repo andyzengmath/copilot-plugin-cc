@@ -97,72 +97,31 @@ const MODEL_ALIASES = new Map([
   // through normalizeRequestedModel rather than getting flagged as unknown.
   ["auto", "auto"]
 ]);
-// Historically Copilot CLI had no per-call reasoning-effort knob, so the
-// plugin translated `--effort` levels into a matching model choice. Copilot
-// CLI 1.0.11+ added a real `--effort` flag (low/medium/high/xhigh), but we
-// keep this mapping for two reasons:
-//   1. Older Copilot CLI versions still in the field don't accept --effort
-//      and would error out if we passed it through.
-//   2. The plugin exposes "none" and "minimal" tiers (codex-plugin-cc
-//      parity) that Copilot's own --effort flag doesn't recognize.
-// A future change should detect Copilot CLI version and prefer the native
-// --effort flag when available, dropping this mapping for everything except
-// the "none"/"minimal" → "low" collapse.
-const EFFORT_TO_MODEL = new Map([
-  ["none", "claude-opus-4.6-fast"],
-  ["minimal", "claude-opus-4.6-fast"],
-  ["low", "claude-opus-4.6-fast"],
-  ["medium", "claude-sonnet-4.6"],
-  ["high", "claude-opus-4.6"],
-  ["xhigh", "claude-opus-4.6"]
-]);
+// Copilot CLI 1.0.11+ has a native `--effort <low|medium|high|xhigh>` flag,
+// so the plugin no longer translates effort into model choice. Both flags
+// are passed through to the one-shot CLI: --model picks the model,
+// --effort picks the reasoning level. The plugin's "none"/"minimal" tiers
+// collapse to "low" at spawn time via normalizeEffortForSettings.
+//
+// Pre-1.0.11 users will see "unknown flag --effort" from Copilot CLI; the
+// fix is to upgrade Copilot. We surface that error verbatim rather than
+// silently falling back to the old model-mapping behavior — falling back
+// would override the user's settings.json default model on every --effort
+// call, which is exactly the bug we're closing.
 
-// When the primary effort-mapped model is not available on the user's
-// Copilot account, /copilot:task degrades down the capability tiers
-// rather than failing outright. The chain only activates for `--effort`
-// (no explicit --model). Each entry is the ordered list of fallbacks
-// AFTER the primary mapping; the runtime loop tries the primary first,
-// then walks this list. Entries lower in the chain are progressively
-// less capable but more widely available (Copilot Free / Pro / Business
-// tiers ship subsets of these models).
-// `claude-haiku-4.5` pins the tail of the medium/high chains as the
-// lowest-cost, widest-availability Claude tier. Added in v0.10 after a
-// `copilot --help` audit confirmed the model is exposed on every tier
-// that ships `--model` support. Strictly-additive: it never fires while
-// an earlier tier is available.
-const EFFORT_FALLBACK_CHAIN = new Map([
-  ["none", []],
-  ["minimal", []],
-  ["low", []],
-  ["medium", ["claude-opus-4.6-fast", "claude-haiku-4.5"]],
-  ["high", ["claude-sonnet-4.6", "claude-opus-4.6-fast", "claude-haiku-4.5"]],
-  ["xhigh", ["claude-sonnet-4.6", "claude-opus-4.6-fast", "claude-haiku-4.5"]]
-]);
+// --probe-models tests this fixed list of commonly-used models against the
+// user's account. We don't probe every model in the catalog (too slow); just
+// the ones a typical user is most likely to ask for via --model.
+const COMMON_PROBE_MODELS = [
+  "claude-opus-4.7",
+  "claude-sonnet-4.6",
+  "claude-haiku-4.5",
+  "claude-opus-4.6-fast",
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.3-codex"
+];
 
-function applyEffortFallbackModel(model, effort) {
-  if (model || !effort) return model;
-  return EFFORT_TO_MODEL.get(effort) ?? null;
-}
-
-function buildEffortModelChain({ requestedModel, effort, primaryModel }) {
-  // Auto-fallback only when --effort drove the model choice. An explicit
-  // --model X is the user opting into a specific model; if it fails, we
-  // surface the error rather than silently substituting.
-  if (requestedModel || !effort || !primaryModel) {
-    return primaryModel ? [primaryModel] : [null];
-  }
-  const fallbacks = EFFORT_FALLBACK_CHAIN.get(effort) ?? [];
-  // Drop duplicates (e.g. if a fallback equals the primary) while
-  // preserving order.
-  const seen = new Set();
-  const chain = [];
-  for (const candidate of [primaryModel, ...fallbacks]) {
-    if (!candidate || seen.has(candidate)) continue;
-    seen.add(candidate);
-    chain.push(candidate);
-  }
-  return chain;
-}
 const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
 
 function printUsage() {
@@ -291,29 +250,20 @@ async function buildSetupReport(cwd, actionsTaken = [], options = {}) {
     nextSteps.push("Optional: run `/copilot:setup --enable-review-gate` to require a fresh review before stop.");
   }
 
-  // --probe-models runs `copilot -p "ping" --model <m>` against every
-  // distinct model that any --effort level could reach — the union of
-  // EFFORT_TO_MODEL primaries and every tier in EFFORT_FALLBACK_CHAIN.
-  // Before v0.10 this only covered the primaries, which hid the
-  // fallback tiers from the probe (users could see "all ok" and still
-  // fall through to a model their account couldn't actually reach).
-  // Skipped by default to keep the default setup fast (each probe is a
-  // full subprocess round-trip).
+  // --probe-models runs `copilot -p "ping" --model <m>` against a small
+  // fixed list of commonly-requested models (COMMON_PROBE_MODELS) so users
+  // can see which models their Copilot account ships with before they hit
+  // an availability error mid-run. Skipped by default — each probe is a
+  // full subprocess round-trip.
   let modelProbe = null;
   if (options.probeModels && copilotStatus.available) {
-    const models = [
-      ...new Set([
-        ...EFFORT_TO_MODEL.values(),
-        ...[...EFFORT_FALLBACK_CHAIN.values()].flat()
-      ])
-    ];
-    modelProbe = await probeModelAvailability(cwd, { models });
+    modelProbe = await probeModelAvailability(cwd, { models: COMMON_PROBE_MODELS });
     const unavailable = modelProbe.filter((r) => !r.available && !r.unknown);
     if (unavailable.length > 0) {
       nextSteps.push(
-        `Some --effort tiers are unavailable on this account: ${unavailable
+        `These models are unavailable on this account: ${unavailable
           .map((r) => r.model)
-          .join(", ")}. /copilot:task will auto-fall-back; or pick --effort low / medium explicitly.`
+          .join(", ")}. Pass --model <available-name> to pick something Copilot can run, or set a default with /copilot:setup --default-model <name>.`
       );
     }
   }
@@ -518,43 +468,15 @@ async function executeReviewRun(request) {
   // sandbox knob). The review prompt templates explicitly tell the agent
   // not to modify files.
   //
-  // --effort driven model selection on the review path shares the same
-  // availability fallback chain as /copilot:task: a missing top-tier
-  // model degrades to the next tier rather than failing outright.
-  // Review never takes `--resume-last`, so the chain is always the full
-  // build result; explicit `--model` still opts out (single-element).
-  const modelChain = buildEffortModelChain({
-    requestedModel: request.requestedModel ?? null,
-    effort: request.effort ?? null,
-    primaryModel: request.model
+  // --model and --effort flow through to the one-shot CLI when set;
+  // Copilot CLI 1.0.11+ honors both independently. When neither is set,
+  // the broker picks up the user's settings.json defaults.
+  const result = await runAppServerTurn(context.repoRoot, {
+    prompt,
+    model: request.model,
+    effort: request.effort,
+    onProgress: request.onProgress
   });
-  if (modelChain.length === 0) {
-    throw new Error(
-      `Internal: buildEffortModelChain returned an empty chain for effort=${request.effort}.`
-    );
-  }
-  let result;
-  for (let i = 0; i < modelChain.length; i += 1) {
-    const candidate = modelChain[i];
-    result = await runAppServerTurn(context.repoRoot, {
-      prompt,
-      model: candidate,
-      onProgress: request.onProgress
-    });
-    if (result.status === 0) break;
-    const hasNext = i < modelChain.length - 1;
-    if (!hasNext) break;
-    if (
-      !isModelUnavailableStderr(result.stderr) &&
-      !isModelUnavailableStderr(result.error?.message ?? "")
-    ) {
-      break;
-    }
-    process.stderr.write(
-      `[copilot] --model ${candidate} appears unavailable on this account; ` +
-        `retrying with --model ${modelChain[i + 1]} (--effort ${request.effort} fallback chain).\n`
-    );
-  }
   const parsed = parseStructuredOutput(result.finalMessage, {
     status: result.status,
     failureMessage: result.error?.message ?? result.stderr
@@ -628,63 +550,22 @@ async function executeTaskRun(request) {
   // sandbox knob, and we intentionally avoid restarting the broker
   // per-command to keep sessionId resume working.
   //
-  // When --effort drove the model choice (no explicit --model), build a
-  // fallback chain so a non-available top-tier model (e.g. user's
-  // Copilot account is on a tier without claude-opus-4.6) degrades to
-  // the next tier rather than failing outright. Resume forces the
-  // broker path, where per-call --model is dropped anyway, so the chain
-  // is collapsed to a single element below.
-  const builtChain = buildEffortModelChain({
-    requestedModel: request.requestedModel ?? null,
-    effort: request.effort ?? null,
-    primaryModel: request.model
-  });
-  // Collapse to a single element on resume: the broker path ignores
-  // per-call --model, so iterating the full chain would fire N identical
-  // broker calls with misleading retry notices naming models that were
-  // never used. Keep the first entry so `result.model` in turn metadata
-  // stays consistent with what the companion originally asked for.
-  const modelChain = resumeThreadId && builtChain.length > 1 ? [builtChain[0]] : builtChain;
-  // Defense against a future change that could produce an empty chain
-  // (e.g. a buildEffortModelChain rewrite that filters everything). The
-  // loop body writes to `result`, and downstream code reads
-  // `result.finalMessage` — a silent crash on `undefined` would be worse
-  // than a loud precondition.
-  if (modelChain.length === 0) {
-    throw new Error(
-      `Internal: buildEffortModelChain returned an empty chain for effort=${request.effort}.`
-    );
-  }
-  // Compute threadName once rather than on every retry iteration; its
-  // inputs (resumeThreadId, request.prompt) are loop-invariant, and if
-  // a future `session/new` evolution forwards threadName, duplicating
-  // calls inside the loop would register multiple sessions under the
-  // same name.
+  // --model and --effort flow through to the one-shot CLI per call;
+  // Copilot CLI 1.0.11+ honors both independently. On resume, both are
+  // dropped (with a stderr notice from runAppServerTurn) because the
+  // broker holds the sessionId and cannot switch model/effort mid-turn.
   const threadName = resumeThreadId
     ? null
     : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT);
-  let result;
-  for (let i = 0; i < modelChain.length; i += 1) {
-    const candidate = modelChain[i];
-    result = await runAppServerTurn(workspaceRoot, {
-      resumeThreadId,
-      prompt: request.prompt,
-      defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
-      model: candidate,
-      onProgress: request.onProgress,
-      threadName
-    });
-    if (result.status === 0) break;
-    const hasNext = i < modelChain.length - 1;
-    if (!hasNext) break;
-    if (!isModelUnavailableStderr(result.stderr) && !isModelUnavailableStderr(result.error?.message ?? "")) {
-      break;
-    }
-    process.stderr.write(
-      `[copilot] --model ${candidate} appears unavailable on this account; ` +
-        `retrying with --model ${modelChain[i + 1]} (--effort ${request.effort} fallback chain).\n`
-    );
-  }
+  const result = await runAppServerTurn(workspaceRoot, {
+    resumeThreadId,
+    prompt: request.prompt,
+    defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
+    model: request.model,
+    effort: request.effort,
+    onProgress: request.onProgress,
+    threadName
+  });
 
   const rawOutput = typeof result.finalMessage === "string" ? result.finalMessage : "";
   const failureMessage = result.error?.message ?? result.stderr ?? "";
@@ -794,15 +675,11 @@ function buildTaskJob(workspaceRoot, taskMetadata, write) {
   });
 }
 
-function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId, requestedModel }) {
+function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId }) {
   return {
     cwd,
     model,
     effort,
-    // Pass through the user's literal --model value so executeTaskRun can
-    // tell "user picked exactly this model" apart from "we mapped from
-    // --effort". Only the latter triggers the auto-fallback chain.
-    requestedModel: requestedModel ?? null,
     prompt,
     write,
     resumeLast,
@@ -896,21 +773,11 @@ async function handleReviewCommand(argv, config) {
     scope: options.scope
   });
 
-  // Share /copilot:task's --effort → model mapping so the two commands
-  // expose a single capability-tier vocabulary. Apply the same "--model
-  // wins, --effort is a no-op" rule and the same unknown-effort notice.
+  // Both flags pass through verbatim to Copilot CLI (1.0.11+ accepts
+  // --model and --effort independently). When neither is set, the broker
+  // path is used and the user's settings.json defaults take effect.
   const effort = normalizeReasoningEffort(options.effort);
   const requestedModel = normalizeRequestedModel(options.model);
-  const model = applyEffortFallbackModel(requestedModel, effort);
-  if (requestedModel && effort) {
-    process.stderr.write(
-      `[copilot] --effort ${effort} is ignored because --model ${requestedModel} was also passed.\n`
-    );
-  } else if (effort && !requestedModel && !EFFORT_TO_MODEL.has(effort)) {
-    process.stderr.write(
-      `[copilot] --effort ${effort} has no mapped model; Copilot CLI will use its config default.\n`
-    );
-  }
 
   config.validateRequest?.(target, focusText);
   const metadata = buildReviewJobMetadata(config.reviewName, target);
@@ -929,8 +796,7 @@ async function handleReviewCommand(argv, config) {
         cwd,
         base: options.base,
         scope: options.scope,
-        model,
-        requestedModel,
+        model: requestedModel,
         effort,
         focusText,
         reviewName: config.reviewName,
@@ -957,26 +823,11 @@ async function handleTask(argv) {
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
+  // Both flags pass through verbatim to Copilot CLI (1.0.11+ accepts
+  // --model and --effort independently). When neither is set, the broker
+  // path is used and the user's settings.json defaults take effect.
   const effort = normalizeReasoningEffort(options.effort);
   const requestedModel = normalizeRequestedModel(options.model);
-  // Copilot does not expose a per-call reasoning-effort knob. When the user
-  // specified --effort but not --model, pick a Copilot model whose capability
-  // tier matches the requested effort. If both are set, --model wins and we
-  // note the effort flag was ignored.
-  const model = applyEffortFallbackModel(requestedModel, effort);
-  const effortOverriddenByModel = Boolean(requestedModel && effort);
-  if (effortOverriddenByModel) {
-    process.stderr.write(
-      `[copilot] --effort ${effort} is ignored because --model ${requestedModel} was also passed.\n`
-    );
-  } else if (effort && !requestedModel && !EFFORT_TO_MODEL.has(effort)) {
-    // If an unknown effort level slipped past validation and no model
-    // fallback applies, let the user know it has no runtime effect rather
-    // than silently accepting the flag.
-    process.stderr.write(
-      `[copilot] --effort ${effort} has no mapped model; Copilot CLI will use its config default.\n`
-    );
-  }
   const prompt = readTaskPrompt(cwd, options, positionals);
 
   const resumeLast = Boolean(options["resume-last"] || options.resume);
@@ -997,9 +848,8 @@ async function handleTask(argv) {
     const job = buildTaskJob(workspaceRoot, taskMetadata, write);
     const request = buildTaskRequest({
       cwd,
-      model,
+      model: requestedModel,
       effort,
-      requestedModel,
       prompt,
       write,
       resumeLast,
@@ -1016,9 +866,8 @@ async function handleTask(argv) {
     (progress) =>
       executeTaskRun({
         cwd,
-        model,
+        model: requestedModel,
         effort,
-        requestedModel,
         prompt,
         write,
         resumeLast,
