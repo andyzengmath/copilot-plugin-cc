@@ -55,7 +55,13 @@ const DEFAULT_COPILOT_SPAWN_ARGS = [
   "--acp",
   "--allow-all-tools",
   "--allow-all-paths",
-  "--allow-all-urls"
+  "--allow-all-urls",
+  // The plugin runs through Claude Code's ACP harness — no human is at the
+  // terminal, so the agent's `ask_user` tool would either stall or get
+  // blanket-auto-approved by `firstAllowOption`. Cleaner to disable it
+  // outright. Surfaced as actionable in the 2026-04-29 upstream audit
+  // (Copilot CLI 1.0.39).
+  "--no-ask-user"
 ];
 
 // Tests can override the Copilot binary + pre-args by setting this env var
