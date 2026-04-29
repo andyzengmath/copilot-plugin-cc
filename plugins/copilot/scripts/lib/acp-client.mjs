@@ -61,7 +61,14 @@ const DEFAULT_COPILOT_SPAWN_ARGS = [
   // blanket-auto-approved by `firstAllowOption`. Cleaner to disable it
   // outright. Surfaced as actionable in the 2026-04-29 upstream audit
   // (Copilot CLI 1.0.39).
-  "--no-ask-user"
+  "--no-ask-user",
+  // Redact the auth-token env vars from Copilot's broker logs and any
+  // shell output it surfaces. The agent might `cat $env:GH_TOKEN` or
+  // `echo $COPILOT_GITHUB_TOKEN` while debugging; --secret-env-vars
+  // makes that text show up as `[REDACTED]` instead of the literal
+  // token. The three names cover Copilot's documented auth precedence
+  // order (COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN).
+  "--secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN"
 ];
 
 // Tests can override the Copilot binary + pre-args by setting this env var
