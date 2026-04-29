@@ -316,6 +316,21 @@ optional). All other fields are preserved.
 
 ## `--effort` → model mapping
 
+> **Superseded in v0.0.16.** Copilot CLI 1.0.11+ added a native
+> `--effort=<low|medium|high|xhigh>` flag, and v0.0.16 dropped the
+> `EFFORT_TO_MODEL` / `EFFORT_FALLBACK_CHAIN` translation entirely.
+> `--effort` now flows verbatim to Copilot CLI; `--model` and
+> `--effort` are independent (both can be passed; Copilot's runtime
+> applies them without conflict). The "ignored because --model was
+> passed" stderr notice was also removed. The plugin's `none` and
+> `minimal` aliases still collapse to `low` at spawn time for
+> codex-plugin-cc command parity.
+>
+> The historical mapping table below remains for context; do NOT
+> reintroduce it. See `plugins/copilot/CHANGELOG.md` v0.0.16 and
+> `docs/plans/2026-04-20-v08-handoff.md` for the replacement
+> behavior.
+
 Copilot CLI does not expose a per-call reasoning-effort flag. It accepts
 `reasoning_effort` in `~/.copilot/config.json` only, which we refuse to
 mutate (fragile under concurrent broker use). Instead, we translate
