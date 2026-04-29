@@ -112,3 +112,67 @@ test("formatActiveModelLine reports CLI default when model is null", () => {
   });
   assert.match(line, /Copilot CLI default/);
 });
+
+test("formatActiveModelLine output matches the literal stderr-echo format", () => {
+  // The plugin emits `[copilot] Using model: ${formatActiveModelLine(info)}\n`
+  // on stderr before every Copilot call (lib/copilot.mjs runAppServerTurn).
+  // Lock in the exact format so a future tweak to the formatter doesn't
+  // silently change the message users see in their terminals.
+  const explicit = formatActiveModelLine({
+    model: "gpt-5.5",
+    effortLevel: "xhigh",
+    source: "~/.copilot/settings.json"
+  });
+  assert.equal(explicit, "gpt-5.5, effort xhigh [~/.copilot/settings.json]");
+
+  const noEffort = formatActiveModelLine({
+    model: "claude-opus-4.7",
+    effortLevel: null,
+    source: "--model flag"
+  });
+  assert.equal(noEffort, "claude-opus-4.7 [--model flag]");
+
+  const cliDefault = formatActiveModelLine({
+    model: null,
+    effortLevel: null,
+    source: "Copilot CLI default"
+  });
+  assert.equal(
+    cliDefault,
+    "Copilot CLI default (claude-sonnet-4.5) [Copilot CLI default]"
+  );
+});
+
+test("COPILOT_HOME with a trailing slash resolves the same settings.json", () => {
+  // Users sometimes export `COPILOT_HOME=/path/to/.copilot/` (trailing
+  // separator). resolveCopilotHome trims whitespace but preserves the slash;
+  // path.join handles the duplicate separator transparently. Both reads
+  // should still hit the same file as the no-slash case.
+  withTempCopilotHome((home) => {
+    fs.writeFileSync(
+      path.join(home, "settings.json"),
+      JSON.stringify({ model: "gpt-5.5" })
+    );
+    const trailing = `${home}${path.sep}`;
+    const info = getActiveCopilotModelInfo({ env: { COPILOT_HOME: trailing } });
+    assert.equal(info.model, "gpt-5.5");
+    assert.match(info.source, /settings\.json/);
+  });
+});
+
+test("settings.json with an inline `// ...` comment after a value fails the JSONC parser gracefully (documented limitation)", () => {
+  // parseJsonWithLineComments only strips full-line `// ...` comments, not
+  // inline trailing comments after a JSON value. Copilot CLI's own writer
+  // never produces inline comments, so this is a hand-edit case. Verify
+  // the failure mode is graceful (returns CLI-default sentinel, doesn't
+  // throw) rather than masking the corruption silently.
+  withTempCopilotHome((home) => {
+    fs.writeFileSync(
+      path.join(home, "settings.json"),
+      `{"model":"gpt-5.5"} // user comment the line-only stripper does not catch`
+    );
+    const info = getActiveCopilotModelInfo({ env: { COPILOT_HOME: home } });
+    assert.equal(info.model, null);
+    assert.equal(info.source, "Copilot CLI default");
+  });
+});
