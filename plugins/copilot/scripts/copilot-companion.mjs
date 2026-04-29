@@ -17,7 +17,6 @@ import {
     getCopilotAvailability,
     getSessionRuntimeStatus,
     interruptAppServerTurn,
-    isModelUnavailableStderr,
     parseStructuredOutput,
     probeModelAvailability,
     runAppServerTurn,

@@ -149,6 +149,11 @@ vite.config.ts.timestamp-*
 output/
 plugins/codex/.generated/
 
+# Per-user agent-tool state (oh-my-claudecode etc.) — local notes,
+# project-memory, and per-session state that contributors keep next to
+# the repo. Not part of the plugin's source.
+.omc/
+
 # This plugin pulls Copilot CLI at runtime rather than shipping locked
 # deps, so package-lock.json is intentionally not checked in (matches the
 # optional-target handling in scripts/bump-version.mjs).
