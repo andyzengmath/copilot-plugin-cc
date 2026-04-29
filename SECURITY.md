@@ -113,6 +113,21 @@ security fixes. Older tags are not backported.
   the explicit boundary. The per-call CLI path has no such per-tool
   approval round-trip and runs with `--allow-all-tools --allow-all-paths`
   for the whole subprocess lifetime.
+
+  **v0.0.17 hardenings on the same path:**
+  - `--no-ask-user` is now appended to both the broker spawn args and
+    the one-shot CLI args, so the agent's `ask_user` tool is
+    unavailable at the CLI level. Without this, a prompt-injected
+    `ask_user` call could either stall the run or get
+    blanket-auto-approved by `firstAllowOption` (returning empty
+    input). With it, the tool isn't surfaced at all.
+  - `--secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN` is
+    pinned on both spawn paths, so a prompt-injected
+    `cat $env:GH_TOKEN` (or any other shell command that echoes those
+    auth-token vars) renders as `[REDACTED]` in stdout/stderr instead
+    of the literal token. This narrows the exfiltration surface for
+    the auth-token vars specifically; other secrets in env are
+    unaffected.
 - **Supply-chain attacks on Copilot CLI or Node dependencies.** The
   plugin trusts whatever binary is on `PATH` as `copilot`, the Node
   runtime you launched with, and the npm packages this repo depends on.
