@@ -911,6 +911,10 @@ async function runCopilotCli(cwd, options = {}) {
     // Claude Code's harness, so the agent's `ask_user` tool would have
     // no answerer. Disable it outright instead of stalling the run.
     "--no-ask-user",
+    // Mirror the broker's auth-token redaction so a debug-style shell
+    // command in the agent's plan can't echo the literal GH_TOKEN /
+    // GITHUB_TOKEN / COPILOT_GITHUB_TOKEN value into the run's stdout.
+    "--secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN",
     "--add-dir",
     cwd
   ];
