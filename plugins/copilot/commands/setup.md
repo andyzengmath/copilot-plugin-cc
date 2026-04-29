@@ -1,6 +1,6 @@
 ---
-description: Check whether the local Copilot CLI is ready and optionally toggle the stop-time review gate
-argument-hint: '[--enable-review-gate|--disable-review-gate]'
+description: Check whether the local Copilot CLI is ready and optionally toggle the stop-time review gate or set the default model and reasoning effort
+argument-hint: '[--enable-review-gate|--disable-review-gate] [--default-model <name|alias>] [--default-effort <low|medium|high|xhigh>] [--probe-models]'
 allowed-tools: Bash(node:*), Bash(npm:*), AskUserQuestion
 ---
 
@@ -35,3 +35,9 @@ Output rules:
 - Present the final setup output to the user.
 - If installation was skipped, present the original setup output.
 - If Copilot is installed but not authenticated, preserve the guidance to run `!copilot login`.
+
+Default model and effort:
+- The setup output shows the active model line (e.g. `active model: gpt-5.5, effort xhigh [~/.copilot/settings.json]`) so users can see what every plugin command will inherit by default.
+- `--default-model <name|alias>` writes a default into `~/.copilot/settings.json`'s `model` key. Aliases (`fast`, `opus`, `sonnet`, `haiku`, `gpt`, `codex`, `auto`) are resolved before persisting; concrete names like `gpt-5.5` or `claude-opus-4.7` pass through.
+- `--default-effort <low|medium|high|xhigh>` writes the corresponding `effortLevel`. The plugin's `none`/`minimal` aliases collapse to `low` since Copilot's settings.json only accepts the four canonical values.
+- Either flag may be passed alone or together. Existing keys in `settings.json` are preserved.

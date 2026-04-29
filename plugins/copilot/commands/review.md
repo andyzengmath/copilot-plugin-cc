@@ -1,6 +1,6 @@
 ---
 description: Run a Copilot code review against local git state
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch]'
+argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <name>] [--effort <none|minimal|low|medium|high|xhigh>]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -38,6 +38,8 @@ Argument handling:
 - The companion script parses `--wait` and `--background`, but Claude Code's `Bash(..., run_in_background: true)` is what actually detaches the run.
 - `/copilot:review` is native-review only. It does not support staged-only review, unstaged-only review, or extra focus text.
 - If the user needs custom review instructions or more adversarial framing, they should use `/copilot:adversarial-review`.
+- `--model` and `--effort` are runtime-selection flags. Preserve them in the forwarded command so the companion can override the user's `~/.copilot/settings.json` default for this single review.
+- Leave both unset unless the user explicitly asks. Without an override the broker inherits the user's default model and effortLevel from `~/.copilot/settings.json`.
 
 Foreground flow:
 - Run:

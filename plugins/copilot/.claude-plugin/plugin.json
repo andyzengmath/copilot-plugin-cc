@@ -1,6 +1,6 @@
 {
   "name": "copilot",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "description": "Use GitHub Copilot CLI from Claude Code to review code or delegate tasks.",
   "author": {
     "name": "andyzengmath"

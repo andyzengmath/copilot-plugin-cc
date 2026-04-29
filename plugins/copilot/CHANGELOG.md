@@ -5,6 +5,51 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.15
+
+This release surfaces which Copilot model the plugin actually uses,
+and adds a way to persist your default model + reasoning effort
+without hand-editing `settings.json`.
+
+Added:
+- Active-model echo to stderr on every Copilot invocation so you can
+  see, at a glance, which model the plugin is dispatching to (alias
+  + resolved model + source).
+- `/copilot:setup` output now prints the inherited model + effort +
+  source, alongside the existing auth/CLI checks.
+- `/copilot:setup --default-model <name|alias>` and
+  `--default-effort <low|medium|high|xhigh>` write your defaults
+  into `~/.copilot/settings.json` atomically. The writer preserves
+  leading `//` comments and unrelated keys, so hand-tuned files
+  survive the round-trip.
+- `--model` and `--effort` flags exposed in the
+  `argument-hint` for `/copilot:review` and
+  `/copilot:adversarial-review`, matching the existing CLI runtime.
+- New `auto` model alias maps to Copilot's auto-model selection
+  (GA 2026-04-17), so `--model auto` now works as a first-class
+  alias instead of a passthrough string.
+
+Fixed:
+- `~/.copilot/settings.json` was previously not read at all — model
+  preferences only lived inside the auth file (`config.json`). The
+  plugin now layers `settings.json` on top so user-pinned defaults
+  actually take effect.
+- `COPILOT_HOME` environment variable is now honored when locating
+  the config dir. Earlier code only checked `XDG_CONFIG_HOME`, which
+  meant users who relocated their Copilot data via `COPILOT_HOME`
+  silently fell back to `~/.copilot`.
+
+Internal:
+- Outdated `:92-93` comment claiming Copilot has no per-call effort
+  knob is corrected. Copilot CLI 1.0.11+ added a real `--effort`
+  flag; a follow-up should pass it through directly instead of
+  routing effort through model aliases.
+
+Test suite: 158 → 174 tests (+16: active-model-info ×8,
+write-copilot-defaults ×9). 170 / 174 pass. The 3 remaining failures
+are pre-existing OneDrive-on-Windows path-resolution issues in
+`resolveStateDir` / status helpers, unrelated to this release.
+
 ## 0.0.14
 
 Two bugs found during a real local install + login on Copilot CLI
