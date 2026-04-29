@@ -79,10 +79,11 @@ const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "hi
 // Copilot premium-request multiplier (through 2026-04-30), so `--model
 // opus` is user-pays-more relative to the v0.0.10-era `opus` → 4.6
 // mapping. Users who want the pre-4.7 cost can type `--model
-// claude-opus-4.6` explicitly. The plugin's `--effort high` default
-// (EFFORT_TO_MODEL below) deliberately stays on `claude-opus-4.6` so
-// automated flows that rely on `--effort` don't change their per-call
-// cost without an explicit user decision.
+// claude-opus-4.6` explicitly. v0.0.16 dropped the EFFORT_TO_MODEL
+// mapping that used to silently shift `--effort` flows onto opus-4.6
+// to dodge this multiplier; `--effort` now flows verbatim to Copilot
+// CLI 1.0.11+'s native flag, and the user's settings.json default
+// model is preserved when `--effort` is set without `--model`.
 const MODEL_ALIASES = new Map([
   ["fast", "claude-opus-4.6-fast"],
   ["opus", "claude-opus-4.7"],

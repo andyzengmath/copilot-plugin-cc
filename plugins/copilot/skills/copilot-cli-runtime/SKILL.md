@@ -25,12 +25,9 @@ Execution rules:
 Command selection:
 - Use exactly one `task` invocation per rescue handoff.
 - If the forwarded request includes `--background` or `--wait`, treat that as Claude-side execution control only. Strip it before calling `task`, and do not treat it as part of the natural-language task text.
-- If the forwarded request includes `--model`, pass it through to `task` unchanged. Accepted aliases: `fast` → `claude-opus-4.6-fast`, `opus` → `claude-opus-4.7`, `sonnet` → `claude-sonnet-4.6`, `haiku` → `claude-haiku-4.5`, `gpt` → `gpt-5.4`, `codex` → `gpt-5.3-codex`. Any concrete Copilot model name works too; it passes through unchanged.
-- If the forwarded request includes `--effort`, pass it through to `task`. The companion maps effort to a Copilot model tier since Copilot CLI has no per-call reasoning knob:
-  - `none`, `minimal`, `low` → `claude-opus-4.6-fast`
-  - `medium` → `claude-sonnet-4.6`
-  - `high`, `xhigh` → `claude-opus-4.6`
-- If both `--model` and `--effort` are supplied, `--model` wins and `--effort` becomes a no-op (the companion emits a stderr notice).
+- If the forwarded request includes `--model`, pass it through to `task` unchanged. Accepted aliases: `fast` → `claude-opus-4.6-fast`, `opus` → `claude-opus-4.7`, `sonnet` → `claude-sonnet-4.6`, `haiku` → `claude-haiku-4.5`, `gpt` → `gpt-5.4`, `codex` → `gpt-5.3-codex`, `auto` → Copilot's auto-model selection (GA 2026-04-17). Any concrete Copilot model name works too; it passes through unchanged.
+- If the forwarded request includes `--effort`, pass it through to `task`. Copilot CLI 1.0.11+ has a native `--effort=<low|medium|high|xhigh>` flag — the companion forwards it verbatim. The plugin's `none`/`minimal` aliases collapse to `low` at spawn time for codex-plugin-cc command parity.
+- `--model` and `--effort` are independent. Pass either or both; Copilot's runtime applies them without conflict. (Pre-v0.0.16 the plugin internally mapped effort to a Claude model tier and emitted a "ignored because --model was passed" stderr notice when both were set — that mapping was removed in v0.0.16.)
 - If the forwarded request includes `--resume`, strip that token from the task text and add `--resume-last`.
 - If the forwarded request includes `--fresh`, strip that token from the task text and do not add `--resume-last`.
 - `--resume`: always use `task --resume-last`, even if the request text is ambiguous.

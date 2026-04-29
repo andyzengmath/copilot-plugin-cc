@@ -26,10 +26,10 @@ Forwarding rules:
 - Do not use that skill to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work beyond shaping the forwarded prompt text.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`. This subagent only forwards to `task`.
-- Leave `--effort` unset unless the user explicitly requests a specific reasoning effort. Copilot CLI has no per-call reasoning knob, so the companion maps effort levels to Copilot model tiers (low→`claude-opus-4.6-fast`, medium→`claude-sonnet-4.6`, high/xhigh→`claude-opus-4.6`).
+- Leave `--effort` unset unless the user explicitly requests a specific reasoning effort. Copilot CLI 1.0.11+ has a native `--effort=<low|medium|high|xhigh>` flag; the companion forwards it verbatim. The plugin's `none`/`minimal` aliases collapse to `low` at spawn time.
 - Leave model unset by default. Only add `--model` when the user explicitly asks for a specific model.
-- Accepted model aliases are `fast`, `opus`, `sonnet`, `haiku`, `gpt`, `codex`. Pass any concrete Copilot model name such as `claude-opus-4.7` or `gpt-5.4-mini` through unchanged with `--model`.
-- If both `--model` and `--effort` are passed, `--model` wins and `--effort` becomes a no-op.
+- Accepted model aliases are `fast`, `opus`, `sonnet`, `haiku`, `gpt`, `codex`, `auto`. Pass any concrete Copilot model name such as `claude-opus-4.7` or `gpt-5.4-mini` through unchanged with `--model`.
+- `--model` and `--effort` are independent. Both flow through to Copilot's runtime, which applies them without conflict.
 - Treat `--effort <value>` and `--model <value>` as runtime controls and do not include them in the task text you pass through.
 - Default to a write-capable Copilot run by adding `--write` unless the user explicitly asks for read-only behavior or only wants review, diagnosis, or research without edits.
 - Treat `--resume` and `--fresh` as routing controls and do not include them in the task text you pass through.
