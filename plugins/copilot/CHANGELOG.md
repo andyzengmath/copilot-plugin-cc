@@ -5,6 +5,54 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.17
+
+Security hardening cycle on top of v0.0.16. Two new flags surfaced
+from the 2026-04-29 upstream audit (Copilot CLI 1.0.39) make the
+plugin's broker and one-shot CLI explicitly non-interactive and
+redact auth tokens from any debug-style shell output the agent
+might surface.
+
+Added:
+- `--no-ask-user` (PR #60). The plugin runs through Claude Code's
+  ACP harness, so the agent's `ask_user` tool had no human to
+  answer it — `firstAllowOption` was auto-approving the
+  `session/request_permission` instead, which let the tool fire but
+  return without meaningful input. Now the tool is unavailable at
+  the CLI level, so the agent never tries to use it.
+- `--secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN`
+  (PR #61). Redacts the three auth-token env vars from broker logs
+  and any shell output the agent surfaces. An LLM-generated
+  `cat $env:GH_TOKEN` while debugging now shows `[REDACTED]` instead
+  of the literal token in stdout.
+
+Both flags are added to `DEFAULT_COPILOT_SPAWN_ARGS` (the broker
+spawn) and to `runCopilotCli` (the one-shot `-p` path) so per-call
+`--model` / `--effort` runs match the broker's behavior.
+
+Internal cleanup since v0.0.16 (no user-visible behavior change):
+- README rewrite + 3 pre-existing OneDrive-on-Windows test fixes
+  (PR #56 — root cause was `CLAUDE_PLUGIN_DATA` and
+  `COPILOT_COMPANION_SESSION_ID` env-leakage from real Claude Code
+  sessions into spawned test subprocesses; tests now scrub the vars
+  before spawn).
+- Drop pre-v0.0.16 effort-mapping prose from skill, agent, and
+  source comments (PR #57). README was updated in #56; #57 covers
+  the files #56 missed.
+- Remove dead `suppressActiveModelEcho` option from
+  `runAppServerTurn` (PR #58). It was added speculatively in v0.0.15
+  and never used. Plus 3 new tests locking in the active-model
+  stderr echo format and edge cases (`COPILOT_HOME` with trailing
+  slash, JSONC inline comments).
+- 2026-04-29 upstream audit doc + design-doc deprecation note for
+  the removed `EFFORT_TO_MODEL` mapping (PR #59).
+
+Test suite: 169 / 168 pass / 1 skipped. Same on Ubuntu and Windows
+CI. Two known flakes under high parallel load
+(`concurrent ensureBrokerSession`, `task --resume-last --effort
+high`) — both pass cleanly when re-run alone; documented in
+`docs/plans/2026-04-20-v08-handoff.md` "Known flakes".
+
 ## 0.0.16
 
 Closes the v0.0.15 user-reported bug: setting `model: "gpt-5.5"` in
