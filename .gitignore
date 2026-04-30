@@ -149,9 +149,10 @@ vite.config.ts.timestamp-*
 output/
 plugins/codex/.generated/
 
-# Per-user agent-tool state (oh-my-claudecode etc.) — local notes,
-# project-memory, and per-session state that contributors keep next to
-# the repo. Not part of the plugin's source.
+# Per-user agent-tool state (Claude Code, oh-my-claudecode, etc.) — local
+# notes, project-memory, and per-session state that contributors keep next
+# to the repo. Not part of the plugin's source.
+.claude/
 .omc/
 
 # This plugin pulls Copilot CLI at runtime rather than shipping locked
