@@ -9,7 +9,6 @@
  * @typedef {import("./acp-protocol").StopReason} StopReason
  * @typedef {((update: string | { message: string, phase: string | null, threadId?: string | null, turnId?: string | null, stderrMessage?: string | null, logTitle?: string | null, logBody?: string | null }) => void)} ProgressReporter
  */
-import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -26,6 +25,7 @@ import {
 } from "./acp-client.mjs";
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
+import { safeSpawn } from "./safe-spawn.mjs";
 
 const TASK_THREAD_PREFIX = "Copilot Companion Task";
 const DEFAULT_CONTINUE_PROMPT =
@@ -690,9 +690,6 @@ export async function probeModelAvailability(cwd, options = {}) {
 
 function probeSingleModel(cwd, model, { env, timeoutMs }) {
   const [bin, ...preArgs] = resolveCopilotCommand(env);
-  const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
-  const shell =
-    useCustomCommand || process.platform !== "win32" ? false : env.SHELL || true;
   const args = [
     ...preArgs,
     "-p",
@@ -712,11 +709,10 @@ function probeSingleModel(cwd, model, { env, timeoutMs }) {
       resolve({ model, ...result });
     };
     let stderrBuf = "";
-    const proc = spawn(bin, args, {
+    const proc = safeSpawn(bin, args, {
       cwd,
       env,
       stdio: ["ignore", "ignore", "pipe"],
-      shell,
       windowsHide: true
     });
     proc.stderr.setEncoding("utf8");
@@ -830,24 +826,13 @@ export function isModelUnavailableStderr(text) {
   return MODEL_UNAVAILABLE_RE.test(text);
 }
 
-// Shell/cmd.exe metacharacters. Any of these in a user-controlled argv slot
-// becomes a command-injection vector on Windows where we keep `shell:true`
-// for `.cmd` launcher resolution (CVE-2024-27980 / "BatBadBut" class). We
-// fail closed across all platforms rather than diffing behaviour by shell
-// flag — callers hitting this can reword or drop `--model`/`--effort` to
-// route through the ACP broker, where prompts travel over JSON-RPC and
-// never reach a shell.
-export const SHELL_METACHAR_RE = /[`$&|;<>^"\r\n\x00]|%[^%]*%/;
-
-export function assertNoShellMetachars(value, label) {
-  if (typeof value !== "string" || SHELL_METACHAR_RE.test(value)) {
-    throw new Error(
-      `Refusing to spawn Copilot CLI: ${label} contains a shell metacharacter ` +
-        "(one of ` $ & | ; < > ^ \" CR LF NUL %VAR%). Reword the " +
-        `${label} or drop --model/--effort to route through the broker.`
-    );
-  }
-}
+// Note: the v0.0.6-era `SHELL_METACHAR_RE` / `assertNoShellMetachars` deny-list
+// was removed in v0.0.18 when the spawn paths migrated to `safeSpawn` (see
+// `lib/safe-spawn.mjs`). safeSpawn pre-resolves Windows .cmd launchers and
+// hands argv to cmd.exe via cross-spawn-style escaping with
+// `windowsVerbatimArguments: true`, so cmd.exe metachars in argv are quoted
+// safely without us needing a runtime deny-list. This eliminates the entire
+// CVE-2024-27980 / "BatBadBut" attack surface in the plugin's own code.
 
 /**
  * Per-call CLI fallback for `--model`. Copilot CLI exposes `--model` only at
@@ -885,22 +870,10 @@ async function runCopilotCli(cwd, options = {}) {
   const model = options.model ? String(options.model) : null;
   const effort = options.effort ? String(options.effort) : null;
   const [bin, ...preArgs] = resolveCopilotCommand(env);
-  const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
-  const shell =
-    useCustomCommand || process.platform !== "win32" ? false : env.SHELL || true;
-  // CVE-2024-27980 is specifically a cmd.exe / shell-string issue: it
-  // applies only when `spawn` routes through a shell, because otherwise
-  // argv is handed to CreateProcess (Windows) or execve (POSIX) verbatim
-  // with no shell interpretation. Plugin-generated review prompts
-  // legitimately carry XML tags and quotes, so apply the deny-list only
-  // on the shell-enabled path rather than failing closed on structurally
-  // valid content that will never hit a shell.
-  if (shell) {
-    assertNoShellMetachars(prompt, "prompt");
-    if (model) assertNoShellMetachars(model, "--model value");
-    if (effort) assertNoShellMetachars(effort, "--effort value");
-    assertNoShellMetachars(cwd, "working directory");
-  }
+  // safeSpawn handles Windows .cmd-launcher resolution + cross-spawn-style
+  // argv escaping internally, so the plugin no longer needs to flip
+  // shell:true on Windows production. The `assertNoShellMetachars` deny-list
+  // (formerly required for the shell:true path) was removed in v0.0.18.
   const args = [
     ...preArgs,
     "-p",
@@ -915,6 +888,17 @@ async function runCopilotCli(cwd, options = {}) {
     // command in the agent's plan can't echo the literal GH_TOKEN /
     // GITHUB_TOKEN / COPILOT_GITHUB_TOKEN value into the run's stdout.
     "--secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN",
+    // Deny shell access to known prompt-injection exfiltration commands.
+    // Per `copilot help permissions`: "Denial rules always take precedence
+    // over allow rules, even --allow-all-tools." These commands have no
+    // legitimate use in code-review or rescue workflows (GitHub API → gh
+    // CLI; npm registry → npm). safeSpawn's escaping handles the parens
+    // and `*` for us so cmd.exe doesn't misparse the argument.
+    "--deny-tool=shell(curl:*)",
+    "--deny-tool=shell(wget:*)",
+    "--deny-tool=shell(nc:*)",
+    "--deny-tool=shell(ncat:*)",
+    "--deny-tool=shell(ssh:*)",
     "--add-dir",
     cwd
   ];
@@ -955,11 +939,10 @@ async function runCopilotCli(cwd, options = {}) {
 
     let stdoutBuf = "";
     let stderrBuf = "";
-    const proc = spawn(bin, args, {
+    const proc = safeSpawn(bin, args, {
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
-      shell,
       windowsHide: true
     });
     proc.stdout.setEncoding("utf8");

