@@ -43,7 +43,7 @@ Operating rules:
 - Do not paraphrase, summarize, rewrite, or add commentary before or after it.
 - Do not ask the subagent to inspect files, monitor progress, poll `/copilot:status`, fetch `/copilot:result`, call `/copilot:cancel`, summarize output, or do follow-up work of its own.
 - Leave `--effort` unset unless the user explicitly asks for a specific reasoning effort.
-- Leave the model unset unless the user explicitly asks for one. Model aliases `fast`, `opus`, `sonnet`, `haiku` are accepted; any concrete Copilot model name such as `claude-opus-4.6` or `gpt-5.2-codex` passes through unchanged.
+- Leave the model unset unless the user explicitly asks for one. Model aliases `fast`, `opus`, `sonnet`, `haiku`, `gpt`, `codex`, and `auto` are accepted; any concrete Copilot model name such as `claude-opus-4.7` or `gpt-5.3-codex` passes through unchanged.
 - Leave `--resume` and `--fresh` in the forwarded request. The subagent handles that routing when it builds the `task` command.
 - If the helper reports that Copilot is missing or unauthenticated, stop and tell the user to run `/copilot:setup`.
 - If the user did not supply a request, ask what Copilot should investigate or fix.
