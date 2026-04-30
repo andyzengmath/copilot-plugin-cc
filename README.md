@@ -21,8 +21,8 @@ that swaps the underlying runtime: `codex app-server` is replaced by
 ## Requirements
 
 - **GitHub Copilot subscription.** Usage counts against your Copilot allowance.
-- **Copilot CLI 0.0.400 or later** (anything that speaks ACP v1).
-- **Node.js 18.18 or later.**
+- **Copilot CLI 1.0.11 or later** (for native `--effort` passthrough; anything that speaks ACP v1).
+- **Node.js 18.20.2+, 20.12.2+, or 22.0.0+** — `engines.node` enforces this so the CVE-2024-27980 (`.cmd` argv-injection) patch is guaranteed present. Earlier 18.x lines are explicitly rejected.
 
 ## Install
 
@@ -229,7 +229,7 @@ See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and
 the per-command porting decisions.
 
-## Status (v0.0.16)
+## Status (v0.0.18)
 
 - Core runtime, broker, companion, and hooks all ported and under test.
 - Standard and adversarial review commands share one prompt-engineered
@@ -259,18 +259,26 @@ the per-command porting decisions.
   (v0.0.8 + v0.0.9 tightening). Violations render as a bulleted
   `Schema violations:` section, not a short-circuited "first error"
   message.
-- A conservative shell-metacharacter deny-list fires on the shell-
-  enabled spawn path (Windows production with the real `.cmd`
-  launcher) so user-controlled prompts can't become a cmd.exe
-  injection vector (CVE-2024-27980 class). Under `shell:false` argv
-  passes to `CreateProcess` / `execve` verbatim, so the deny-list
-  is skipped — safely — rather than rejecting legitimately-structured
-  review prompts (XML tags, code fences).
+- All three Copilot spawn sites use `lib/safe-spawn.mjs` (v0.0.18) — a
+  cross-spawn-style helper that pre-resolves Windows `.cmd`/`.bat`
+  launchers via PATHEXT and applies argv escaping with
+  `windowsVerbatimArguments: true`, so `shell: false` everywhere. This
+  closed the CVE-2024-27980 ("BatBadBut") class without the
+  hand-rolled deny-list that v0.0.3-v0.0.17 carried.
+- Defense-in-depth on the prompt-injection path: `--no-ask-user`
+  (v0.0.17) removes the `ask_user` tool at the CLI level so a
+  prompt-injected ask can't stall the run; `--secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN`
+  (v0.0.17) redacts auth tokens from any debug-style shell output the
+  agent surfaces; `--deny-tool=shell(<cmd>:*)` for `curl`/`wget`/`nc`/`ncat`/`ssh`
+  (v0.0.18) cuts off exfiltration commands even with the broker's
+  `--allow-all-tools` (denial > allow per `copilot help permissions`).
 - Test coverage is end-to-end against a spawnable fake-ACP fixture
-  (`tests/fake-copilot.mjs`). 169 tests across runtime suites, unit
-  tests (SHELL_METACHAR_RE, prompt loader, firstAllowOption, broker
+  (`tests/fake-copilot.mjs`). 173 tests across runtime suites, unit
+  tests (safe-spawn, prompt loader, firstAllowOption, broker
   endpoint, schema validator, settings.json reader/writer, etc.) and
-  the protocol-agnostic set. CI runs on every PR on Ubuntu + Windows.
+  the protocol-agnostic set. `tests/safe-spawn.test.mjs` (v0.0.18) is
+  the first CI test that exercises the production Windows
+  `.cmd`-launcher spawn path. CI runs on every PR on Ubuntu + Windows.
 
 See
 [`docs/plans/2026-04-20-v08-handoff.md`](docs/plans/2026-04-20-v08-handoff.md)
@@ -279,9 +287,9 @@ for the running backlog and per-release details.
 ## Security
 
 See [SECURITY.md](SECURITY.md) for the threat model, the Windows ACL
-caveat on `broker.json`, the per-call CLI shell-metacharacter deny-list,
-and how to report vulnerabilities via a private GitHub Security
-Advisory.
+caveat on `broker.json`, the v0.0.18 cross-spawn helper plus
+`--deny-tool` exfiltration denials, and how to report vulnerabilities
+via a private GitHub Security Advisory.
 
 ## License
 
