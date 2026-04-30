@@ -141,6 +141,33 @@ test("task --model codex resolves the alias to --model gpt-5.3-codex via -p", ()
   );
 });
 
+test("task --model gpt resolves the alias to --model gpt-5.5 via -p", () => {
+  // Locks in the v0.20 refresh of `gpt` to track the new top-of-family
+  // GPT model (gpt-5.5; baseline was gpt-5.4 from v0.0.12). Tests for
+  // the GPT-family shortcut so a future refresh (e.g. 5.6) can't
+  // silently stale the alias without a test update.
+  const pluginData = makeTempDir();
+  const spawnLog = path.join(makeTempDir(), "spawn.jsonl");
+  const result = runCompanion(
+    ["task", "--model", "gpt", "hi"],
+    {
+      pluginData,
+      script: buildScriptedPrompt("gpt ok"),
+      spawnLog
+    }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /gpt ok/);
+  const cli = readSpawnLog(spawnLog).find((entry) => entry.argv.includes("-p"));
+  assert.ok(cli, "expected a -p invocation");
+  const modelIdx = cli.argv.indexOf("--model");
+  assert.equal(
+    cli.argv[modelIdx + 1],
+    "gpt-5.5",
+    `expected --model gpt-5.5 after alias resolution; got ${JSON.stringify(cli.argv)}`
+  );
+});
+
 test("task --model opus resolves the alias to --model claude-opus-4.7 via -p", () => {
   // Locks in the v0.11 refresh of `opus` to track the new top-of-
   // family model (claude-opus-4.7). Tests for the Claude-family

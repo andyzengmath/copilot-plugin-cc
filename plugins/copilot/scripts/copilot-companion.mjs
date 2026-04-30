@@ -89,7 +89,7 @@ const MODEL_ALIASES = new Map([
   ["opus", "claude-opus-4.7"],
   ["sonnet", "claude-sonnet-4.6"],
   ["haiku", "claude-haiku-4.5"],
-  ["gpt", "gpt-5.4"],
+  ["gpt", "gpt-5.5"],
   ["codex", "gpt-5.3-codex"],
   // `auto` lets Copilot pick the best model per prompt (GA 2026-04-17). It's
   // a literal Copilot model identifier, not a plugin invention, so the alias
