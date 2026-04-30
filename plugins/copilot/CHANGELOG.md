@@ -5,6 +5,64 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.18
+
+Security hardening continuation on top of v0.0.17. Closes the
+deferred items from the 2026-04-29 deep-dive: `--deny-tool` patterns
+that previously broke under Windows `shell:true` cmd.exe parsing
+now ship cleanly via a new cross-spawn-style helper.
+
+Added:
+- `lib/safe-spawn.mjs` — drop-in replacement for `child_process.spawn`
+  that handles Windows `.cmd`/`.bat` launchers correctly without
+  using `shell: true`. Modeled on `moxystudio/node-cross-spawn`'s
+  `parseNonShell` + escape pipeline. Pre-resolves PATHEXT, builds
+  `cmd.exe /d /s /c "<escaped>"` with backslash-double-quoting +
+  caret-escape of cmd metacharacters, spawns with
+  `windowsVerbatimArguments: true`. cmd-shims under
+  `node_modules/.bin` get a second escape pass (BatBadBut
+  mitigation).
+- 5x `--deny-tool=shell(<cmd>:*)` flags pinned on broker
+  `DEFAULT_COPILOT_SPAWN_ARGS` and one-shot `runCopilotCli` for
+  `curl`, `wget`, `nc`, `ncat`, `ssh`. Per `copilot help permissions`:
+  *"Denial rules always take precedence over allow rules, even
+  --allow-all-tools."* Closes the prompt-injection-via-curl /
+  exfiltration-via-nc threats. These commands have no legitimate
+  use in code-review or rescue workflows (GitHub API → `gh`; npm
+  registry → `npm`).
+- `tests/safe-spawn.test.mjs` (3 tests). One Windows-only test
+  writes a `.cmd` shim around `fake-copilot.mjs` and asserts
+  metachar argv (`--deny-tool=shell(curl:*)`) reaches the child
+  verbatim through the launcher. This is the FIRST CI test that
+  exercises the production Windows `.cmd`-launcher path —
+  previously tests always pointed `COPILOT_COMPANION_COPILOT_COMMAND`
+  at `node fake.mjs` and never touched the `shell:true` branch.
+
+Changed:
+- All three spawn sites (`SpawnedCopilotAcpClient.initialize`,
+  `runCopilotCli`, `probeSingleModel`) migrated to `safeSpawn` with
+  `shell: false` everywhere. The Windows-vs-non-Windows shell
+  ternary is gone.
+- `engines.node` bumped from `>=18.18.0` to
+  `>=18.20.2 || >=20.12.2 || >=22.0.0` so the CVE-2024-27980 patch
+  (Node's mitigation against `.cmd` argv injection) is guaranteed
+  present. Older 18.x lines are unpatched and would silently lose
+  the entire mitigation.
+
+Removed:
+- `assertNoShellMetachars` helper + `SHELL_METACHAR_RE` constant
+  (-50 LOC). The hand-rolled deny-list was incomplete (didn't
+  cover `(`, `)`, `*`) and applied only to a subset of argv
+  positions. safeSpawn's full escape pipeline replaces it across
+  all spawn sites.
+- `tests/shell-metachar-regex.test.mjs` (-72 LOC). The unit tests
+  for the deleted helpers go with them.
+
+Test suite: 173 / 172 pass / 1 skipped on Ubuntu + Windows CI.
+The new safe-spawn.test.mjs Windows-only test passes on the
+windows-latest runner — first CI exercise of the production
+`.cmd`-launcher spawn path.
+
 ## 0.0.17
 
 Security hardening cycle on top of v0.0.16. Two new flags surfaced
