@@ -5,6 +5,72 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.19
+
+Polish cycle on top of v0.0.18. Tightens `engines.node` to actually
+enforce the per-major-line floors v0.0.18 intended, plus a documentation
+refresh that brings the README and handoff doc in sync with the v0.0.17
+and v0.0.18 hardenings.
+
+Fixed:
+- `engines.node` (PR #72): tightened from `>=18.20.2 || >=20.12.2 || >=22.0.0`
+  to `^18.20.2 || ^20.12.2 || >=22.0.0`. The previous expression reduced
+  to effectively `>=18.20.2` because npm semver `>=` is unbounded above,
+  silently accepting Node 19.x and 21.x (both EOL) on hosts that may
+  lack the CVE-2024-27980 (`.cmd` argv-injection) patch v0.0.18 was
+  trying to require. The new caret-bounded expression enforces
+  18.x ≥ 18.20.2, 20.x ≥ 20.12.2, and 22.0.0+ explicitly.
+  **Behavioral change**: Node 19.x and 21.x users now hit a clear
+  engines mismatch on `npm install` instead of silently passing
+  through to an unpatched runtime. Both lines are EOL upstream, so
+  the practical impact is small.
+
+Changed:
+- `README.md` (PR #71): refresh through v0.0.18. Status section
+  bumped v0.0.16 → v0.0.18. Replaced the shell-metacharacter
+  deny-list bullet with a description of the v0.0.18 `lib/safe-spawn.mjs`
+  cross-spawn helper. Added a defense-in-depth bullet covering the
+  v0.0.17 `--no-ask-user` + `--secret-env-vars` flags and the v0.0.18
+  `--deny-tool=shell(<cmd>:*)` denials for `curl`/`wget`/`nc`/`ncat`/`ssh`.
+  Test count `169` → `173`. Drop the `SHELL_METACHAR_RE` reference
+  from the unit-test list; mention `tests/safe-spawn.test.mjs` as the
+  first CI test exercising the production Windows `.cmd`-launcher
+  spawn path. Requirements bumped to Copilot CLI 1.0.11+ and Node.js
+  18.20.2+/20.12.2+/22.0.0+. Security paragraph now references the
+  v0.0.18 cross-spawn helper plus `--deny-tool` exfiltration denials.
+- `docs/plans/2026-04-20-v08-handoff.md` (PRs #67, #68, #69):
+  - PR #67: post-v0.0.18 update folding the cross-spawn refactor
+    notes into the live handoff.
+  - PR #68: post-merge stale-reference cleanup. Replaced the
+    `### Security deny-list` section with `### Spawn safety
+    (cross-spawn helper, v0.0.18)` pointing at `lib/safe-spawn.mjs`.
+    Replaced the `### EFFORT_TO_MODEL / fallback-chain tuning`
+    backlog entry (referencing code removed in v0.0.16) with a
+    `### MODEL_ALIASES refresh` entry following the v0.0.11/12 alias-
+    refresh recipe. `node --test` example count `169 / 168` → `173 / 172`;
+    `git log --oneline -5` example "atop v0.0.16" → "atop v0.0.18".
+    "Key files to re-read first" drops dead `EFFORT_TO_MODEL`,
+    `EFFORT_FALLBACK_CHAIN`, `buildEffortModelChain`, and
+    `SHELL_METACHAR_RE` pointers; adds `lib/safe-spawn.mjs`. Removed
+    3 untracked v0.0.18 cross-spawn debug repros from `tests/`.
+  - PR #69: 2026-04-30 upstream audit (CLI 1.0.40-0) section.
+    Re-confirmed both upstream-blocked items remain blocked
+    (no stdin / `--prompt-file` for `-p`; no per-`session/new`
+    permission flags). Net new flag surface since 1.0.39:
+    `--reasoning-effort` (alias for `--effort`, plugin already wires
+    `--effort`) and `--no-bash-env` (explicit-off pair to `--bash-env`).
+    Neither actionable.
+- `.gitignore` (PR #70): add `.claude/` alongside the existing `.omc/`
+  entry. Per-user Claude Code agent-tool state shouldn't be staged
+  by accidental `git add .`.
+
+Test suite: 173 / 172 pass / 1 skipped. Unchanged count (no source
+behavior changes apart from `engines.node`; test fixtures unaffected).
+CI green on Ubuntu and Windows runners (both on Node 22, satisfying
+the third clause of the new `engines.node`).
+
+See merged PRs #67, #68, #69, #70, #71, #72 for the full review history.
+
 ## 0.0.18
 
 Security hardening continuation on top of v0.0.17. Closes the
