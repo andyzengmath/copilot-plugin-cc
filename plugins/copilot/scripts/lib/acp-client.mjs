@@ -24,11 +24,11 @@
 import fs from "node:fs";
 import net from "node:net";
 import process from "node:process";
-import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { parseBrokerEndpoint } from "./broker-endpoint.mjs";
 import { BROKER_SECRET_ENV, ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
 import { terminateProcessTree } from "./process.mjs";
+import { safeSpawn } from "./safe-spawn.mjs";
 
 const PLUGIN_MANIFEST_URL = new URL("../../.claude-plugin/plugin.json", import.meta.url);
 const PLUGIN_MANIFEST = JSON.parse(fs.readFileSync(PLUGIN_MANIFEST_URL, "utf8"));
@@ -68,7 +68,18 @@ const DEFAULT_COPILOT_SPAWN_ARGS = [
   // makes that text show up as `[REDACTED]` instead of the literal
   // token. The three names cover Copilot's documented auth precedence
   // order (COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN).
-  "--secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN"
+  "--secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN",
+  // Deny shell access to known prompt-injection exfiltration commands.
+  // Per `copilot help permissions`: "Denial rules always take precedence
+  // over allow rules, even --allow-all-tools." These commands have no
+  // legitimate use in code-review or rescue workflows (GitHub API → gh
+  // CLI; npm registry → npm). safeSpawn's escaping (lib/safe-spawn.mjs)
+  // ensures the parens and `*` survive cmd.exe parsing on Windows.
+  "--deny-tool=shell(curl:*)",
+  "--deny-tool=shell(wget:*)",
+  "--deny-tool=shell(nc:*)",
+  "--deny-tool=shell(ncat:*)",
+  "--deny-tool=shell(ssh:*)"
 ];
 
 // Tests can override the Copilot binary + pre-args by setting this env var
@@ -287,22 +298,16 @@ class SpawnedCopilotAcpClient extends AcpClientBase {
     const [bin, ...preArgs] = resolveCopilotCommand(env);
     const args = [...preArgs, ...spawnArgs];
 
-    // When a custom COPILOT_COMMAND override is in play (tests), skip the
-    // shell wrapper — we're spawning a known Node script directly and
-    // cmd.exe /c semantics only add failure modes. The shell wrapper is
-    // needed in production on Windows because the real copilot CLI can
-    // ship as a `.cmd` launcher.
-    const useCustomCommand = Boolean(env[COPILOT_COMMAND_ENV]);
-    const shell =
-      useCustomCommand || process.platform !== "win32"
-        ? false
-        : env.SHELL || true;
-
-    this.proc = spawn(bin, args, {
+    // safeSpawn handles the Windows .cmd-launcher resolution + cross-spawn
+    // style argv escaping internally, so we no longer need to flip
+    // shell:true on Windows production. That eliminates the cmd.exe
+    // metachar-injection class entirely (CVE-2024-27980 / "BatBadBut") and
+    // lets us pass argv with `(`, `)`, `*` etc. (e.g. `--deny-tool=shell(curl:*)`)
+    // verbatim through to Copilot.
+    this.proc = safeSpawn(bin, args, {
       cwd: this.cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
-      shell,
       windowsHide: true
     });
 
