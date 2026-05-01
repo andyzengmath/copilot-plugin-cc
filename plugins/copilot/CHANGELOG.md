@@ -5,6 +5,46 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.21
+
+Single fix surfaced by the v0.0.20 post-release dogfooding smoke
+test (`/copilot:setup --probe-models`, the first time the plugin
+exercised its own commands against a real Copilot CLI install
+immediately after a release).
+
+Fixed:
+- `probeModelAvailability` default `timeoutMs` bumped 15000 →
+  60000ms (PR #85). Running `/copilot:setup --probe-models` against
+  Copilot CLI 1.0.40-0 immediately after v0.0.20 reported all 7
+  probed models as "unknown — probe timed out after 15000ms" with
+  no real availability signal. Measured cold-start of
+  `copilot -p "ping" --model gpt-5.5` was ~33s end-to-end (each
+  one-shot CLI invocation re-loads agent skills + MCP servers
+  before resolving the model — cold-start dominates). The 15s
+  default (set in v0.0.7) was reliably below that. Bumped to 60s
+  with a measurement comment so future re-tunings are data-driven.
+  Probes still run in parallel via `Promise.all`, so wall-clock
+  cost of `--probe-models` is bounded by the slowest probe, not
+  the sum. Default extracted to a `DEFAULT_PROBE_TIMEOUT_MS`
+  module-level constant per project convention (matches
+  `DEFAULT_STATUS_WAIT_TIMEOUT_MS`, `BROKER_LOCK_DEFAULT_TIMEOUT_MS`).
+
+Process notes:
+- First release directly verified by the v0.0.20 `CONTRIBUTING.md`
+  pre-release smoke test. Post-fix probe result on a real account:
+  6 / 7 models OK, 1 (`claude-opus-4.6-fast`) correctly identified
+  as unavailable via `isModelUnavailableStderr` and surfaced in
+  the next-steps banner.
+
+Test suite: 174 / 173 pass / 1 skipped (unchanged — the change is
+a default-value bump; existing `setup-probe.test.mjs` cases use a
+fake Copilot binary with no real cold-start and don't depend on
+the timeout literal). CI green on Ubuntu and Windows.
+
+See merged PR #85 for the full review history (including the
+`/pr-review` consistency finding that turned the inline `60000`
+into a named constant).
+
 ## 0.0.20
 
 User-facing model-alias refresh. The 2026-04-30 supported-models doc
