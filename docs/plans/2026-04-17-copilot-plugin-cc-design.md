@@ -431,7 +431,11 @@ appear.
 > Structured-output enforcement shipped as `validateReviewOutput`
 > walking `plugins/copilot/schemas/review-output.schema.json`
 > end-to-end with accumulated violations rendered as a bulleted
-> `Schema violations:` section (PR #29; tightened in v0.0.9 PR #32).
+> `Schema violations:` section (PR #29; tightened in v0.0.9 PRs
+> #32–#33: PR #32 un-exported `validateReviewOutput` and simplified
+> `normalizeReviewFinding` to trim-only; PR #33 aligned the
+> `.trim().length === 0` whitespace check across all five
+> `minLength:1` fields).
 > Item 1 (custom sandboxing per ACP session) remains upstream-blocked
 > on Copilot CLI exposing per-session permission flags via
 > `session/new` — re-confirmed across audits 2026-04-20 / -21 / -29 /
