@@ -26,7 +26,7 @@ ACP-version drift can ship green.
 
 Expected:
 
-1. `auth: loggedIn`, `cli: available (1.0.X)`, and the model probe
+1. `auth: Copilot login active for <username>`, `copilot: <version>; ACP v<N> runtime available`, and the model probe
    lists each common model as `ok` (or names the unavailable ones
    explicitly via `isModelUnavailableStderr`). The active-model line
    shows the inherited default (model + effort + source).
