@@ -33,32 +33,33 @@ security fixes. Older tags are not backported.
   `initialize` handshake (`initParams._meta.brokerSecret`) before it
   will accept any other RPC. The secret is rotated every time a new
   broker is spawned.
-- **Command injection via per-call `--model`.** When `/copilot:task` is
-  invoked with `--model` or `--effort`, the plugin bypasses the broker
-  and spawns `copilot -p "<prompt>" --model <model>` as a one-shot
-  subprocess. With `--effort` (no explicit `--model`) the plugin may
-  spawn up to four such subprocesses in sequence as it walks the
-  model-availability fallback chain in
-  [`plugins/copilot/scripts/copilot-companion.mjs`](./plugins/copilot/scripts/copilot-companion.mjs)
-  (as of v0.0.10 the `high` / `xhigh` tier runs opus-4.6 → sonnet-4.5
-  → opus-4.6-fast → haiku-4.5); the per-spawn attack surface described
-  here is identical on every iteration. On Windows the real Copilot CLI ships as a `.cmd`
-  launcher, so Node's `spawn()` has to use `shell: true` for PATH /
-  PATHEXT resolution — which opens a CVE-2024-27980 ("BatBadBut") class
-  injection surface. The plugin closes this by validating `prompt`,
-  `--model` value, and `cwd` against a conservative shell-metacharacter
-  deny-list (see
-  [`plugins/copilot/scripts/lib/copilot.mjs`](./plugins/copilot/scripts/lib/copilot.mjs))
-  before every shell-enabled spawn. The check is scoped to the
-  shell-enabled path because `spawn` with `shell:false` hands argv
-  directly to `CreateProcess` / `execve` without shell interpretation,
-  so metacharacters are literal — the deny-list would only false-
-  positive on legitimately-structured content (XML tags in review
-  prompts, quoted arguments) that never reaches a shell. On Windows
-  with the real Copilot `.cmd` launcher, `shell` is truthy and the
-  guard is active. Matches are rejected with a clear error; the caller
-  can reword, or drop `--model`/`--effort` to route through the broker
-  instead, where prompts travel over JSON-RPC and never see a shell.
+- **Command injection via per-call `--model` or `--effort`.** When
+  `/copilot:task`, `/copilot:review`, or `/copilot:adversarial-review`
+  is invoked with `--model` or `--effort`, the plugin bypasses the
+  broker and spawns `copilot -p "<prompt>" --model <model>` as a
+  one-shot subprocess. On Windows the real Copilot CLI ships as a
+  `.cmd` launcher, which historically required Node's `spawn()` to use
+  `shell: true` for PATH / PATHEXT resolution — opening a
+  CVE-2024-27980 ("BatBadBut") class injection surface.
+
+  Since v0.0.18 every spawn site (broker `--acp`, one-shot
+  `runCopilotCli`, model-availability `probeSingleModel`) routes
+  through
+  [`plugins/copilot/scripts/lib/safe-spawn.mjs`](./plugins/copilot/scripts/lib/safe-spawn.mjs)
+  with `shell: false`. The helper pre-resolves Windows `.cmd`/`.bat`
+  launchers via PATHEXT, applies cross-spawn-style argv escaping
+  (backslash-double-quoting + caret-escape of cmd metacharacters), and
+  spawns with `windowsVerbatimArguments: true`. With `shell: false`
+  argv reaches the child verbatim — `prompt`, `--model` value, and
+  `cwd` cannot become metacharacters in a cmd.exe context, so the
+  CVE-2024-27980 class is closed at the spawn boundary rather than at
+  an input filter. The v0.0.3-era hand-rolled `SHELL_METACHAR_RE` +
+  `assertNoShellMetachars` deny-list was deleted in v0.0.18 (it was
+  incomplete — missed `(`, `)`, `*` — and is no longer needed under
+  `shell: false`). `engines.node` requires Node 18.20.2+, 20.12.2+, or
+  22.0.0+ (caret-bounded since v0.0.19) so the upstream Node
+  CVE-2024-27980 mitigation is guaranteed present alongside the
+  plugin's own escape pipeline.
 
 - **Concurrent-session broker hijack.** Two Claude sessions starting on
   the same workspace simultaneously could previously race to each spawn
@@ -197,12 +198,11 @@ security fixes. Older tags are not backported.
   `--allow-all-tools --allow-all-paths --allow-all-urls` set. Tracked
   upstream; blocked on Copilot CLI exposing per-session flags via the
   ACP `session/new` surface.
-- **Review-path `--effort` on Windows production** currently routes
-  through `shell: true` with the real `.cmd` launcher, which means
-  review prompts containing XML tags are rejected by the shell-metachar
-  deny-list (safe-by-default). A `shell: false` path requires Copilot
-  CLI to accept a prompt via stdin or `--prompt-file` so XML content
-  stays out of argv; tracked in
-  [docs/plans/2026-04-20-v08-handoff.md](./docs/plans/2026-04-20-v08-handoff.md).
-  Users on Windows prod can route review without `--effort` through the
-  broker (where prompts travel over JSON-RPC and never reach a shell).
+- **Review-path `--effort` argv on Windows.** The v0.0.18 cross-spawn
+  helper (see "Command injection" above) handles `.cmd` argv-quoting
+  for review prompts containing XML tags, so XML survives the cmd.exe
+  escape pipeline and reaches Copilot verbatim under `shell: false`.
+  The pre-v0.0.18 deny-list rejection of XML tags is gone. End-to-end
+  Windows-production verification of `/copilot:review --effort` with
+  XML-bearing prompts is not yet captured by an explicit CI test;
+  tracked in [docs/plans/2026-04-20-v08-handoff.md](./docs/plans/2026-04-20-v08-handoff.md).

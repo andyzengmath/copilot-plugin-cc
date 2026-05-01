@@ -154,7 +154,7 @@ location is `$COPILOT_HOME/settings.json` if you've set
 2. `--model` / `--effort` CLI flags on the plugin command
 3. `COPILOT_MODEL` / `COPILOT_EFFORT_LEVEL` environment variables
 4. `model` / `effortLevel` keys in `~/.copilot/settings.json`
-5. Copilot CLI's built-in default (`claude-sonnet-4.5` today)
+5. Copilot CLI's built-in default (`claude-sonnet-4.6` today)
 
 The fastest way to change your default for every plugin command is:
 
@@ -229,7 +229,7 @@ See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and
 the per-command porting decisions.
 
-## Status (v0.0.18)
+## Status (v0.0.20)
 
 - Core runtime, broker, companion, and hooks all ported and under test.
 - Standard and adversarial review commands share one prompt-engineered
@@ -273,7 +273,7 @@ the per-command porting decisions.
   (v0.0.18) cuts off exfiltration commands even with the broker's
   `--allow-all-tools` (denial > allow per `copilot help permissions`).
 - Test coverage is end-to-end against a spawnable fake-ACP fixture
-  (`tests/fake-copilot.mjs`). 173 tests across runtime suites, unit
+  (`tests/fake-copilot.mjs`). 174 tests across runtime suites, unit
   tests (safe-spawn, prompt loader, firstAllowOption, broker
   endpoint, schema validator, settings.json reader/writer, etc.) and
   the protocol-agnostic set. `tests/safe-spawn.test.mjs` (v0.0.18) is

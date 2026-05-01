@@ -1,6 +1,6 @@
 # Copilot Prompt Anti-Patterns
 
-Avoid these when prompting Copilot or GPT-5.4.
+Avoid these when prompting Copilot or GPT-5.5.
 
 ## Vague task framing
 
