@@ -661,3 +661,32 @@ test("task with piped stdin prompt runs and surfaces output", () => {
   assert.equal(result.status, 0, `stderr: ${result.stderr}`);
   assert.match(result.stdout, /stdin ok/);
 });
+
+test("task --model haiku surfaces spawn-error when the Copilot binary is missing", () => {
+  // Exercises runCopilotCli's `proc.on('error')` branch in
+  // plugins/copilot/scripts/lib/copilot.mjs (around L956), which fires when
+  // the spawn itself fails (ENOENT for a missing binary, EACCES for a
+  // non-executable path, etc.). The other CLI-path tests in this file
+  // always point COPILOT_COMPANION_COPILOT_COMMAND at a real fake-copilot
+  // script and so only reach the `proc.on('close')` branch.
+  //
+  // We force the per-call CLI path with `--model haiku` and override the
+  // command to a path that's guaranteed not to exist. The companion should
+  // surface the failure rather than hang or crash.
+  const pluginData = makeTempDir();
+  const missingBin = path.join(makeTempDir(), "definitely-not-a-real-copilot-binary");
+  const result = runCompanion(
+    ["task", "--model", "haiku", "trigger spawn error"],
+    {
+      pluginData,
+      extraEnv: {
+        COPILOT_COMPANION_COPILOT_COMMAND: JSON.stringify([missingBin])
+      }
+    }
+  );
+  // The runCopilotCli error path settles with status 1 (see buildCliResult
+  // when error is non-null). Non-zero exit at the companion level is the
+  // observable signal that the spawn-error branch fired rather than a
+  // success-path return.
+  assert.notEqual(result.status, 0, `expected non-zero status for spawn-error path; got 0. stderr: ${result.stderr}`);
+});
