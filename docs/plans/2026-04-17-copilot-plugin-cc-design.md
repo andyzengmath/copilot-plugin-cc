@@ -425,6 +425,18 @@ appear.
 
 ## Deferred to v1.1
 
+> **Items 2 and 3 shipped in v0.0.8.** Concurrent broker reuse landed
+> via a workspace-scoped `broker.lock` (atomic `O_CREAT|O_EXCL`) plus
+> dual-budget liveness checks for the slow-path teardown (PR #28).
+> Structured-output enforcement shipped as `validateReviewOutput`
+> walking `plugins/copilot/schemas/review-output.schema.json`
+> end-to-end with accumulated violations rendered as a bulleted
+> `Schema violations:` section (PR #29; tightened in v0.0.9 PR #32).
+> Item 1 (custom sandboxing per ACP session) remains upstream-blocked
+> on Copilot CLI exposing per-session permission flags via
+> `session/new` — re-confirmed across audits 2026-04-20 / -21 / -29 /
+> -30. The list below is preserved as historical context.
+
 - Custom sandboxing per ACP session (blocked on upstream Copilot CLI).
 - Concurrent broker reuse across multiple Claude sessions on the same
   workspace (codex-plugin-cc has this through per-session broker sockets;
@@ -456,6 +468,27 @@ appear.
     fixture until green.
 
 ## Open questions for implementation time
+
+> **All four resolved as of v0.0.5.**
+> - **Q1 (npm package name):** confirmed `@github/copilot` (the README
+>   install command and `/copilot:setup --probe-models` use this name).
+> - **Q2 (`--acp` permission flags):** `--acp` accepts
+>   `--allow-all-tools` / `--allow-all-paths` / `--allow-all-urls` at
+>   spawn time. The plugin pins them in `DEFAULT_COPILOT_SPAWN_ARGS`
+>   alongside `--no-ask-user`, `--secret-env-vars`, and
+>   `--deny-tool=shell(<cmd>:*)` for `curl` / `wget` / `nc` / `ncat` /
+>   `ssh` (v0.0.17–v0.0.18 hardenings).
+> - **Q3 (per-session session ID):** `copilotSessionId` is threaded
+>   through the task payload and surfaced in
+>   `renderStoredJobResult`'s resume command (shipped v0.0.2 PR #3).
+> - **Q4 (model-availability degradation):** originally solved by the
+>   v0.0.5 `--effort` fallback chain (`isModelUnavailableStderr` regex
+>   detecting availability phrases). v0.0.16 dropped the chain entirely
+>   (along with `EFFORT_TO_MODEL`) when Copilot CLI 1.0.11+ added a
+>   native `--effort` flag — the model-unavailable error from Copilot
+>   now surfaces directly to the user with no plugin-side retry.
+>
+> The list below is preserved as historical context.
 
 - Exact Copilot CLI npm package name (`@github/copilot` vs
   `@github/copilot-cli`) — verify at setup-script time.
