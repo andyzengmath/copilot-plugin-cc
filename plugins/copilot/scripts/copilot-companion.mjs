@@ -89,7 +89,7 @@ const MODEL_ALIASES = new Map([
   ["opus", "claude-opus-4.7"],
   ["sonnet", "claude-sonnet-4.6"],
   ["haiku", "claude-haiku-4.5"],
-  ["gpt", "gpt-5.4"],
+  ["gpt", "gpt-5.5"],
   ["codex", "gpt-5.3-codex"],
   // `auto` lets Copilot pick the best model per prompt (GA 2026-04-17). It's
   // a literal Copilot model identifier, not a plugin invention, so the alias
@@ -318,7 +318,7 @@ async function handleSetup(argv) {
   // --default-model / --default-effort write into ~/.copilot/settings.json so
   // the change is respected by every Copilot client (this plugin's broker,
   // direct `copilot` invocations, and other tools that read the same file).
-  // We resolve plugin aliases (gpt → gpt-5.4, etc.) before persisting so the
+  // We resolve plugin aliases (gpt → gpt-5.5, etc.) before persisting so the
   // file holds Copilot's canonical model identifier rather than the alias.
   const requestedDefaultModelRaw = options["default-model"];
   const requestedDefaultEffort = options["default-effort"];

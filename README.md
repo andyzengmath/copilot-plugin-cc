@@ -118,7 +118,7 @@ Flags: `--background`, `--wait`, `--resume`, `--fresh`, `--model <name>`, `--eff
 
 **Model aliases**: `fast` → `claude-opus-4.6-fast`, `opus` →
 `claude-opus-4.7`, `sonnet` → `claude-sonnet-4.6`, `haiku` →
-`claude-haiku-4.5`, `gpt` → `gpt-5.4`, `codex` → `gpt-5.3-codex`,
+`claude-haiku-4.5`, `gpt` → `gpt-5.5`, `codex` → `gpt-5.3-codex`,
 `auto` → Copilot's auto-model-selection (GA 2026-04-17).
 Any concrete Copilot model name works too — e.g.
 `--model claude-opus-4.6` or `--model gpt-5.5` or
