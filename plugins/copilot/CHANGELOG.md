@@ -5,6 +5,49 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.20
+
+User-facing model-alias refresh. The 2026-04-30 supported-models doc
+check ([docs.github.com/en/copilot/reference/ai-models/supported-models](https://docs.github.com/en/copilot/reference/ai-models/supported-models))
+surfaced `gpt-5.5` as the new top-of-family non-codex GPT model —
+bumps the plugin's `gpt` alias to track the catalog. Mirrors the
+v0.0.11 / v0.0.12 alias-refresh recipe.
+
+Changed:
+- `MODEL_ALIASES` (PR #76): `gpt` → `gpt-5.5` (was `gpt-5.4`, set in
+  v0.0.12). Strictly additive — concrete model names always passed
+  through verbatim, so `--model gpt-5.5` already worked before this
+  PR; this just bumps the user-facing shortcut.
+- README and `plugins/copilot/skills/copilot-cli-runtime/SKILL.md`
+  alias lists refreshed to match (PR #76).
+- Inline alias-resolution comment in
+  `plugins/copilot/scripts/copilot-companion.mjs` (line 321) synced
+  to `gpt → gpt-5.5`. The first commit missed it; the `/code-review`
+  pass on PR #76 surfaced it and the fixup landed in the same PR.
+
+Other catalog deltas surfaced by the same doc check (none actionable):
+- `claude-opus-4.7` still latest opus (matches `opus` alias).
+- `claude-sonnet-4.6` still latest sonnet (matches `sonnet` alias).
+- `claude-haiku-4.5` still latest haiku (matches `haiku` alias).
+- `gpt-5.3-codex` still latest codex (matches `codex` alias).
+- `gpt-5.4-mini` and `gpt-5.4-nano` are visible — never had short
+  aliases, so nothing to do.
+
+Added:
+- `tests/runtime-task.test.mjs`: `task --model gpt resolves the alias
+  to --model gpt-5.5 via -p` (+1 case). Mirrors the existing
+  codex/opus alias-resolution tests so a future bump (e.g. 5.6)
+  cannot silently stale the alias without a test update.
+
+`COMMON_PROBE_MODELS` deliberately retains both `gpt-5.5` and
+`gpt-5.4` (and other prior-generation models) since the probe list is
+about what users commonly ask for, not just current top-of-family.
+
+Test suite: 174 / 173 pass / 1 skipped (was 173 / 172 / 1; +1 from
+the new gpt-alias case). CI green on Ubuntu and Windows.
+
+See merged PR #76 for the full review history.
+
 ## 0.0.19
 
 Polish cycle on top of v0.0.18. Tightens `engines.node` to actually
