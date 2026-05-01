@@ -318,7 +318,7 @@ async function handleSetup(argv) {
   // --default-model / --default-effort write into ~/.copilot/settings.json so
   // the change is respected by every Copilot client (this plugin's broker,
   // direct `copilot` invocations, and other tools that read the same file).
-  // We resolve plugin aliases (gpt → gpt-5.4, etc.) before persisting so the
+  // We resolve plugin aliases (gpt → gpt-5.5, etc.) before persisting so the
   // file holds Copilot's canonical model identifier rather than the alias.
   const requestedDefaultModelRaw = options["default-model"];
   const requestedDefaultEffort = options["default-effort"];
