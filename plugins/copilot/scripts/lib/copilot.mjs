@@ -678,10 +678,18 @@ export async function getCopilotAuthStatus(cwd, options = {}) {
  * `--effort` tier upfront rather than discovering unavailability at
  * task time via the fallback-chain stderr notices.
  */
+// 60s default — measured cold-start of `copilot -p "ping" --model X` on
+// CLI 1.0.40-0 was ~33s for a single invocation (per the v0.0.20
+// post-release dogfooding smoke test). 15s (the v0.0.7 default) reliably
+// timed out every probe with a misleading "unknown" verdict on real
+// accounts. Probes still run in parallel, so wall-clock cost of
+// `--probe-models` is bounded by the slowest probe, not the sum.
+const DEFAULT_PROBE_TIMEOUT_MS = 60000;
+
 export async function probeModelAvailability(cwd, options = {}) {
   const env = options.env ?? process.env;
   const models = Array.isArray(options.models) ? options.models : [];
-  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : DEFAULT_PROBE_TIMEOUT_MS;
   if (models.length === 0) return [];
   return Promise.all(
     models.map((model) => probeSingleModel(cwd, model, { env, timeoutMs }))
