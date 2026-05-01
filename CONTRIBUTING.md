@@ -30,6 +30,10 @@ Expected:
    lists each common model as `ok` (or names the unavailable ones
    explicitly via `isModelUnavailableStderr`). The active-model line
    shows the inherited default (model + effort + source).
+   Note: `claude-opus-4.6-fast` may show as `unavailable` on accounts
+   that don't have the corresponding Copilot tier — that is expected
+   behavior, not a regression. The probe surfaces the unavailability
+   correctly via `isModelUnavailableStderr`.
 2. The `copilot:copilot-rescue` subagent forwards to `task`, which
    spawns the shared `copilot --acp` broker, runs the ACP turn, and
    returns with stdout containing `echo hello`. The active-model line
@@ -38,7 +42,7 @@ Expected:
    `status: done`, and `/copilot:result <id>` retrieves the same
    stdout.
 
-A 30-second run catches:
+A smoke-test run (typically under 2 minutes — the broker spawn dominates: each one-shot `copilot -p` invocation is ~33s cold-start on real Copilot CLI 1.0.40, and the rescue-path warm-broker turn was ~48s in the v0.0.20 dogfood) catches:
 
 - **Stale model aliases** — the alias resolves on the plugin side but
   the underlying model errors out at spawn (the v0.0.20 `gpt-5.5` bump

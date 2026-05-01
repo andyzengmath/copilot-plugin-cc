@@ -22,7 +22,7 @@ that swaps the underlying runtime: `codex app-server` is replaced by
 
 - **GitHub Copilot subscription.** Usage counts against your Copilot allowance.
 - **Copilot CLI 1.0.11 or later** (for native `--effort` passthrough; anything that speaks ACP v1).
-- **Node.js 18.20.2+, 20.12.2+, or 22.0.0+** — `engines.node` enforces this so the CVE-2024-27980 (`.cmd` argv-injection) patch is guaranteed present. Earlier 18.x lines are explicitly rejected.
+- **Node.js 18.20.2–18.x, 20.12.2–20.x, or 22.0.0+** — caret-bounded so EOL Node 19.x and 21.x are explicitly rejected. `engines.node` enforces the floors so the CVE-2024-27980 (`.cmd` argv-injection) patch is guaranteed present.
 
 ## Install
 
@@ -229,7 +229,7 @@ See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and
 the per-command porting decisions.
 
-## Status (v0.0.20)
+## Status (v0.0.21)
 
 - Core runtime, broker, companion, and hooks all ported and under test.
 - Standard and adversarial review commands share one prompt-engineered
@@ -282,7 +282,9 @@ the per-command porting decisions.
 
 See
 [`docs/plans/2026-04-20-v08-handoff.md`](docs/plans/2026-04-20-v08-handoff.md)
-for the running backlog and per-release details.
+for the running backlog and per-release details, and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the maintainer pre-release
+smoke-test recipe.
 
 ## Security
 
