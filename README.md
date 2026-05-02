@@ -274,7 +274,7 @@ the per-command porting decisions.
   (v0.0.18) cuts off exfiltration commands even with the broker's
   `--allow-all-tools` (denial > allow per `copilot help permissions`).
 - Test coverage is end-to-end against a spawnable fake-ACP fixture
-  (`tests/fake-copilot.mjs`). 174 tests across runtime suites, unit
+  (`tests/fake-copilot.mjs`). 180 tests across runtime suites, unit
   tests (safe-spawn, prompt loader, firstAllowOption, broker
   endpoint, schema validator, settings.json reader/writer, etc.) and
   the protocol-agnostic set. `tests/safe-spawn.test.mjs` (v0.0.18) is
