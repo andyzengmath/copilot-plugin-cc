@@ -33,7 +33,7 @@ Command selection:
 - `--resume`: always use `task --resume-last`, even if the request text is ambiguous.
 - `--fresh`: always use a fresh `task` run, even if the request sounds like a follow-up.
 - `--effort`: accepted values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`.
-- `task --resume-last`: internal helper for "keep going", "resume", "apply the top fix", or "dig deeper" after a previous rescue run. Within a single Claude session the companion reuses the cached Copilot session ID over ACP. Across Claude sessions it falls back to `copilot -p --continue`, which means streaming progress degrades to coarse phase transitions.
+- `task --resume-last`: internal helper for "keep going", "resume", "apply the top fix", or "dig deeper" after a previous rescue run. Within a single Claude session the companion reuses the cached Copilot session ID over ACP (full streaming progress). Across Claude sessions there's no in-broker fallback — `render.mjs` emits a `copilot --continue ${sessionId}` hint string so users can resume via the Copilot CLI directly (the in-plugin Path B subprocess fallback was descoped in v1).
 
 Safety rules:
 - Default to write-capable Copilot work in `copilot:copilot-rescue` unless the user explicitly asks for read-only behavior.

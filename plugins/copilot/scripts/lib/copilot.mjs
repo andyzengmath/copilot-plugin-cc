@@ -1114,15 +1114,6 @@ export async function runAppServerTurn(cwd, options = {}) {
   });
 }
 
-export async function runAppServerReview(cwd, options = {}) {
-  // Copilot CLI has no native `review/start` RPC. The companion script is
-  // expected to build a structured review prompt and call runAppServerTurn
-  // directly. We keep this export so the companion's native-review branch
-  // can be simplified without breaking imports; it delegates to
-  // runAppServerTurn under the hood.
-  return runAppServerTurn(cwd, options);
-}
-
 export async function findLatestTaskThread(_cwd) {
   // Copilot's ACP surface has no thread-listing RPC. The companion script
   // falls back to the local `state.mjs` job store, which already tracks
