@@ -122,6 +122,18 @@ if (cliArgs[0] === "-p") {
     );
     process.exit(1);
   }
+  // `script.hangModels: ["..."]` lets tests simulate a probe that never
+  // responds (degraded backend, stuck cold-start) so the per-probe
+  // setTimeout settle path in `probeSingleModel` is exercised end-to-end.
+  // Sleep 30s — well above any plausible test `timeoutMs`; the parent's
+  // proc.kill() arrives via SIGTERM well before this resolves. Using a
+  // finite setTimeout (rather than `new Promise(() => {})`) avoids
+  // Node's "Detected unsettled top-level await" exit-13 path.
+  const hangModels = Array.isArray(script?.hangModels) ? script.hangModels : [];
+  if (invokedModel && hangModels.includes(invokedModel)) {
+    await new Promise((resolve) => setTimeout(resolve, 30000));
+    process.exit(0);
+  }
   const updates = Array.isArray(script?.prompt?.updates) ? script.prompt.updates : [];
   const text = updates
     .map((update) =>
