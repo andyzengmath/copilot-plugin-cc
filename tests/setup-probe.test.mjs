@@ -153,6 +153,35 @@ test("setup --probe-models surfaces claude-haiku-4.5 in nextSteps when it is the
   );
 });
 
+test("setup --probe-models emits a stderr 'Probing N models' progress signal and summary", () => {
+  // The probe loop waits up to DEFAULT_PROBE_TIMEOUT_MS (60s) per model
+  // against real Copilot CLI cold-start. Without a stderr heartbeat the
+  // user sees a silent terminal for 30-60s — the plugin looks hung. Lock
+  // the heartbeat + the post-await summary so a regression that drops
+  // either line ships loudly. Format change is a deliberate user-visible
+  // contract; updating the literal here AND in copilot-companion.mjs's
+  // buildSetupReport block is the safe pattern (see
+  // feedback_snapshot_tests_can_rubber_stamp_stale_literals memory entry).
+  const pluginData = makeTempDir();
+  const result = runCompanion(
+    ["setup", "--probe-models"],
+    { pluginData, script: pingScript({ unavailableModels: ["claude-opus-4.7"] }) }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  assert.match(
+    result.stderr,
+    /\[copilot\] Probing 7 models in parallel \(up to 60s each\)\.\.\./,
+    "stderr must announce the probe before the await settles"
+  );
+  // Summary line: 6 ok, 1 unavailable (claude-opus-4.7), 0 unknown given
+  // pingScript's deterministic responses for non-listed models.
+  assert.match(
+    result.stderr,
+    /\[copilot\] Probe complete: 6 ok, 1 unavailable, 0 unknown\./,
+    "stderr must summarize counts after the await settles"
+  );
+});
+
 test("setup --probe-models JSON output includes modelProbe array", () => {
   const pluginData = makeTempDir();
 

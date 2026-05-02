@@ -257,8 +257,22 @@ async function buildSetupReport(cwd, actionsTaken = [], options = {}) {
   // full subprocess round-trip.
   let modelProbe = null;
   if (options.probeModels && copilotStatus.available) {
+    // Real Copilot CLI cold-start is ~33s per model and the probe waits up
+    // to DEFAULT_PROBE_TIMEOUT_MS (60s; v0.0.21). Probes run in parallel
+    // via Promise.all so wall-clock is bounded by the slowest, but a silent
+    // 30-60s terminal makes the plugin look hung. Surface a one-line "now
+    // probing" hint on stderr so the user (or an agent watching) sees
+    // progress, then summarize when the await settles.
+    process.stderr.write(
+      `[copilot] Probing ${COMMON_PROBE_MODELS.length} models in parallel (up to 60s each)...\n`
+    );
     modelProbe = await probeModelAvailability(cwd, { models: COMMON_PROBE_MODELS });
+    const okCount = modelProbe.filter((r) => r.available).length;
     const unavailable = modelProbe.filter((r) => !r.available && !r.unknown);
+    const unknownCount = modelProbe.filter((r) => r.unknown).length;
+    process.stderr.write(
+      `[copilot] Probe complete: ${okCount} ok, ${unavailable.length} unavailable, ${unknownCount} unknown.\n`
+    );
     if (unavailable.length > 0) {
       nextSteps.push(
         `These models are unavailable on this account: ${unavailable
