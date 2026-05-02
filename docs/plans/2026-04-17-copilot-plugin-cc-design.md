@@ -122,6 +122,7 @@ copilot-plugin-cc/
 │   │   └── lib/
 │   │       ├── acp-client.mjs                  # NEW — ACP v1 JSON-RPC
 │   │       ├── acp-protocol.d.ts               # NEW — ACP v1 types
+│   │       ├── safe-spawn.mjs                  # NEW v0.0.18 — cross-spawn-style helper
 │   │       ├── copilot.mjs                     # PORT of codex.mjs
 │   │       ├── broker-lifecycle.mjs            # REUSE (agnostic)
 │   │       ├── broker-endpoint.mjs             # REUSE
@@ -308,6 +309,18 @@ Codex's `thread/resume` is a first-class RPC. Copilot's ACP declares
 
 ### Path B — CLI fallback (cross-Claude-session)
 
+> **Descoped in v1; never implemented.** The Path B subprocess fallback
+> below was specified in the v1 design but did not ship. The runtime
+> falls back to a fresh `session/new` when the cached broker session is
+> gone, accepting that thread continuity breaks across Claude sessions.
+> Users see a `copilot --continue ${sessionId}` resume hint emitted by
+> `render.mjs:197` / `:496` for manual recovery via the Copilot CLI
+> directly. The subprocess fallback that does exist (`runCopilotCli` in
+> `lib/copilot.mjs`) is for per-call `--model` / `--effort` switching,
+> not cross-session resume.
+>
+> Content preserved below as design-intent context.
+
 1. When path A fails (broker restarted, Claude session restarted), look up
    the most recent completed task job in `state.mjs` and read its
    `copilotSessionId` field (written by `runAppServerTurn` after
@@ -342,6 +355,10 @@ optional). All other fields are preserved.
 > reintroduce it. See `plugins/copilot/CHANGELOG.md` v0.0.16 and
 > `docs/plans/2026-04-20-v08-handoff.md` for the replacement
 > behavior.
+
+> _What follows describes pre-v0.0.16 behavior — see the supersession
+> callout above for current architecture. Preserved for design-intent
+> context._
 
 Copilot CLI does not expose a per-call reasoning-effort flag. It accepts
 `reasoning_effort` in `~/.copilot/config.json` only, which we refuse to
