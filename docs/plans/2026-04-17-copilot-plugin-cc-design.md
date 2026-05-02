@@ -42,7 +42,7 @@ its entire shape because the replacement `copilot.mjs` matches
 `getCodexAvailability` (renamed `getCopilotAvailability`),
 `getCodexAuthStatus` (renamed `getCopilotAuthStatus`),
 `findLatestTaskThread`, `buildPersistentTaskThreadName`,
-`parseStructuredOutput`, `readOutputSchema`, `DEFAULT_CONTINUE_PROMPT`.
+`parseStructuredOutput`, `DEFAULT_CONTINUE_PROMPT`.
 
 Net reuse target: **~60% literal reuse, ~40% swap**. Roughly 1200–1500 LOC
 of new/modified code against the plugin's ~4000 LOC baseline.

@@ -1165,8 +1165,4 @@ export function parseStructuredOutput(rawOutput, fallback = {}) {
   }
 }
 
-export function readOutputSchema(schemaPath) {
-  return readJsonFile(schemaPath);
-}
-
-export { DEFAULT_CONTINUE_PROMPT, TASK_THREAD_PREFIX };
+export { DEFAULT_CONTINUE_PROMPT };

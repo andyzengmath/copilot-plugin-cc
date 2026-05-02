@@ -131,7 +131,7 @@ function printUsage() {
       "  node scripts/copilot-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/copilot-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/copilot-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
-      "  node scripts/copilot-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
+      "  node scripts/copilot-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh>] [--prompt-file <path>] [prompt]",
       "  node scripts/copilot-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/copilot-companion.mjs result [job-id] [--json]",
       "  node scripts/copilot-companion.mjs cancel [job-id] [--json]"
@@ -689,7 +689,12 @@ function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId
 
 function readTaskPrompt(cwd, options, positionals) {
   if (options["prompt-file"]) {
-    return fs.readFileSync(path.resolve(cwd, options["prompt-file"]), "utf8");
+    const promptPath = path.resolve(cwd, options["prompt-file"]);
+    try {
+      return fs.readFileSync(promptPath, "utf8");
+    } catch (error) {
+      throw new Error(`Failed to read --prompt-file ${options["prompt-file"]}: ${error.code || error.message}`);
+    }
   }
 
   const positionalPrompt = positionals.join(" ");
