@@ -173,6 +173,17 @@ LOW findings as a table; references prior audit PRs.
   callouts.
 - **PR #97** (`4c1dbcf`, 2026-05-02) — closes Team C HIGH #2 from
   #93's meta-review: 4 setup-config flag e2e tests.
+- **PR #99** (`3aa64cc`, 2026-05-02) — fifth pass (round-2 4-team
+  meta-review on post-#98 state): 3 more dead exports purged
+  (`runAppServerReview` + 2 test helpers); Path B descope sweep
+  across README + cli-runtime SKILL (PR #91's narrower scope fixed
+  only the design doc); `Past audits` list completion. Net -19 LOC.
+  Deferred 4 Team D findings.
+- **PR #100** (`1239e06`, 2026-05-02) — closes Team D HIGH #1 from
+  #99's meta-review: `--probe-models` UX stderr progress signal.
+- **PR #101** (`c1832f0`, 2026-05-02) — closes Team D HIGH #2 +
+  MEDIUM #1 from #99's meta-review: `printUsage` banner synced
+  with `commands/*.md` argument-hints; new `--version` / `-v` flag.
 
 Audit-prompt scope is a compounding asset: each pass that surfaces a
 new question class should update the
