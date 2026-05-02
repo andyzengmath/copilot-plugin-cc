@@ -262,6 +262,71 @@ only change is the string `codex` → `copilot` in rendered output.
 `cancel` invokes `session/cancel` (via `interruptAppServerTurn`) instead of
 `turn/interrupt`, but the public contract is identical.
 
+### `task` (internal subcommand of `copilot-companion.mjs`)
+
+The `task` subcommand is the workhorse used by every `/copilot:rescue`
+invocation, the stop-review-gate hook, and the detached `task-worker`
+background dispatcher. It is **not** a user-facing slash command —
+`commands/rescue.md` and `prompts/stop-review-gate.md` both shell out
+to `task` directly, and skills like `copilot-cli-runtime/SKILL.md`
+document the flag set for agent prompt templates.
+
+Flag set (verbatim from `handleTask` in `copilot-companion.mjs`; also
+the largest flag surface in the plugin):
+
+```
+node scripts/copilot-companion.mjs task \
+  [--background] [--write] \
+  [--resume-last|--resume|--fresh] \
+  [--model <model>] \
+  [--effort <none|minimal|low|medium|high|xhigh>] \
+  [--prompt-file <path>] \
+  [prompt]
+```
+
+Behaviour:
+
+- **Foreground (default):** spawns the broker if needed, runs a single
+  ACP turn, streams `session/update` events into the on-stderr progress
+  reporter, prints the parsed final output to stdout, and returns.
+- **`--background`:** writes a queued job record to `state.mjs`, spawns
+  a detached `task-worker` subprocess that reads the same record and
+  executes the turn out-of-band, and returns immediately with a job ID.
+  The user (or agent) polls via `/copilot:status <id>` and reads the
+  final output via `/copilot:result <id>`.
+- **`--resume-last` / `--resume`:** Path A resume — looks up the most
+  recent completed task thread in `state.mjs`, reads its
+  `copilotSessionId`, and continues that ACP session. Path B
+  (cross-Claude-session subprocess fallback) was descoped in v1 — see
+  the supersession callout in the [Resume semantics](#resume-semantics-detailed)
+  section below.
+- **`--fresh`:** explicitly forces a new thread; mutually exclusive
+  with `--resume-last` / `--resume` (the handler throws if both are
+  set).
+- **`--write`:** loosens the prompt-contract scoping so the model is
+  permitted to edit files. Without `--write`, the prompt template
+  advertises read-only review semantics. Rescue-driven invocations
+  add this flag by default.
+- **`--prompt-file <path>`:** reads the prompt body from a local file
+  instead of positional argv or piped stdin. Missing/unreadable paths
+  emit a normalized `Failed to read --prompt-file ...: <code>` error.
+- **Prompt sourcing precedence:** `--prompt-file` > positional argv
+  joined > piped stdin. If none yields a non-empty string AND
+  `--resume-last` is not set, the handler exits with
+  `Provide a prompt, a prompt file, piped stdin, or use --resume-last`.
+
+Sibling internal subcommands (also dispatched via the main switch in
+`copilot-companion.mjs`, also not user-facing slash commands):
+
+- **`task-worker --job-id <id>`:** the detached worker invoked by
+  `task --background`. Reads the job record from `state.mjs` and
+  runs the turn, writing progress + final result back to the same
+  record. Not invoked by users directly.
+- **`task-resume-candidate`:** queries the most recent completed task
+  thread and emits whether a resume is available (used by the
+  `/copilot:rescue` agent template at `commands/rescue.md` to decide
+  whether to offer a "continue previous task" branch).
+
 ## Permissions model
 
 Codex uses a `sandbox: "read-only" | "workspace-write"` flag on every turn.
