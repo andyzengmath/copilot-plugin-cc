@@ -80,6 +80,94 @@ above any current `MODEL_ALIASES` slot). The audit produces a new
 `## Upstream audit findings (YYYY-MM-DD, CLI X.Y.Z)` section appended
 to the handoff.
 
+## Doc-vs-code audit ritual
+
+This complements the upstream re-audit cadence above: where that
+audit checks for *upstream Copilot CLI* drift, this audit checks for
+drift between this plugin's own docs and its own implementation.
+
+**When to run:** before tagging a release where 5+ PRs have merged
+since the last audit, OR ad-hoc when a maintainer suspects doc/code
+divergence (e.g., after a refactor that touched user-visible strings
+— display labels, command flags, model aliases).
+
+**Pattern:** dispatch 4 lens-scoped agents in parallel via the Task
+tool. Each agent compares one slice of the doc surface against the
+implementation and returns HIGH/MEDIUM/LOW findings with `file:line`
+citations. The maintainer verifies each citation before bundling and
+ships a single hygiene PR.
+
+**The 4 lenses:**
+
+- **L1: Original design doc ↔ current implementation** —
+  `docs/plans/2026-04-17-copilot-plugin-cc-design.md` cross-checked
+  against `plugins/copilot/scripts/lib/*.mjs`.
+- **L2: Handoff doc ↔ current reality** —
+  `docs/plans/2026-04-20-v08-handoff.md` for stale facts (test counts,
+  version refs, file paths, untagged-PR follow-ups).
+- **L3: User-facing docs ↔ command behavior** — `README.md`,
+  `plugins/copilot/skills/**/SKILL.md`, `plugins/copilot/commands/*.md`,
+  `plugins/copilot/agents/*.md`,
+  `plugins/copilot/copilot-agents/*.md`,
+  `plugins/copilot/prompts/*.md` ↔
+  `plugins/copilot/scripts/copilot-companion.mjs` flag handlers +
+  `MODEL_ALIASES`.
+- **L4: Project-level docs/configs ↔ implementation** — `SECURITY.md`,
+  this file, `plugins/copilot/CHANGELOG.md`, `package.json`, plugin
+  manifests ↔ recent PRs and source.
+
+**What each agent's prompt MUST explicitly ask for** (narrow prompts
+miss whole flavors of staleness — the lesson is captured in the
+maintainer's `feedback_audit_prompt_scope_determines_findings.md`
+memory entry):
+
+1. Stale facts (current claim X vs current code Y).
+2. **Described-but-never-shipped architecture** — sections describing
+   in present tense an implementation path that was never built. Tell
+   the agent to verify each described path exists in code via
+   `git grep` before treating it as alive.
+3. **Stale prose adjacent to supersession callouts** — prose the
+   callout makes historical-by-implication but doesn't explicitly
+   frame.
+4. **Internal contradictions** — sections that contradict each other
+   within the same doc.
+5. **Stale function/symbol citations** — every cited identifier should
+   grep clean against current code.
+
+Per-finding output format: HIGH/MEDIUM/LOW with `file:line`, quoted
+stale text under 100 chars, contradicting reality, suggested minimal
+fix.
+
+**Verify before bundling:** read each cited line in the source file
+before adding to the bundle. Agents are mostly trustworthy but can
+hallucinate line numbers or misquote.
+
+**Bundle workflow:** branch `docs/post-vX.Y.Z-audit-bundle-N` (where
+N is the audit pass number); single commit; PR body lists HIGH / MED /
+LOW findings as a table; references prior audit PRs.
+
+**Past audits:**
+
+- **PR #88** (`c513f33`, 2026-05-01) — first pass: tier 1-5 hygiene
+  fixes across user-facing docs + supersession callouts.
+- **PR #89** (`b3891f8`, 2026-05-01) — second pass: design-doc
+  spawn-flags block → 11-arg canonical set; LOC-sizing callout;
+  `formatActiveModelLine` fallback `claude-sonnet-4.5` →
+  `claude-sonnet-4.6` (paired test update); `commands/status.md`
+  `[--json]` hint; `CONTRIBUTING.md` fence `bash` → `text`.
+- **PR #90** (`ad426be`, 2026-05-01) — single deferred follow-up from
+  #89: `acp-client.mjs:9` file-header docstring refresh.
+- **PR #91** (`6c0440f`, 2026-05-02) — third pass: Path B descoped
+  marker; `--effort → model` prose historical framing;
+  `safe-spawn.mjs` added to design-doc layout; handoff
+  post-v0.0.21 hygiene block.
+
+Audit-prompt scope is a compounding asset: each pass that surfaces a
+new question class should update the
+`feedback_audit_prompt_scope_determines_findings.md` memory entry so
+the next pass starts from the broader prompt baseline, not the
+narrower one.
+
 ## Status
 
 This file documents what the maintainer has been doing informally
