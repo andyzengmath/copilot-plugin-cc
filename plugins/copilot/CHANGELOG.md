@@ -5,6 +5,69 @@ retroactively renumbered to 0.0.1 and 0.0.2 to better reflect their
 pre-1.0 alpha status. Version strings inside the v0.0.1 tag's commit
 still say 0.1.0; the tag itself is the canonical identifier.
 
+## 0.0.22
+
+Post-v0.0.21 hygiene + UX bundle. 16 untagged PRs (#88-#103) shipped
+between the v0.0.21 tag and this release across two directed
+4-team meta-review cycles. Most were doc/test hygiene; this entry
+captures only the user-facing changes worth a CHANGELOG line.
+
+Fixed:
+- `formatActiveModelLine` fallback display string `claude-sonnet-4.5`
+  → `claude-sonnet-4.6` (PR #89). The fallback surfaces in the setup
+  report and per-call stderr echo when no model is configured. The
+  pre-existing literal-format-locking test at
+  `active-model-info.test.mjs:142` silently agreed with the stale
+  literal, which is precisely why the bug shipped through 21 releases
+  — fixed in source + test together.
+- `task --prompt-file <path>` now wrapped in try/catch with a
+  normalized error: `Failed to read --prompt-file ...: <code>` instead
+  of a raw Node `ENOENT` trace (PR #93). The flag was previously
+  documented in the command MD but missing from the `printUsage` help
+  banner; both surfaces are now in sync.
+
+Added:
+- `setup --probe-models` now emits a stderr progress signal: `Probing
+  N models in parallel (up to 60s each)...` before the await, and
+  `Probe complete: X ok, Y unavailable, Z unknown.` after (PR #100).
+  Real Copilot CLI cold-start is ~33s per model — without the
+  heartbeat the user sees a silent 30-60s terminal and assumes the
+  plugin hung.
+- Top-level `--version` / `-v` flag (PR #101). Reads version from
+  `.claude-plugin/plugin.json` so users can confirm which version is
+  installed without reading the manifest by hand. Helpful for bug
+  reports.
+- `printUsage` banner synced with each `commands/<cmd>.md`
+  `argument-hint` (PR #101): adds `--default-model`, `--default-effort`,
+  `--probe-models` to setup; `--model`, `--effort` to review and
+  adversarial-review; `--wait`, `--timeout-ms` to status. A
+  `// Keep in sync with each commands/<cmd>.md argument-hint` comment
+  was added to make the contract explicit.
+
+Process notes:
+- Two directed 4-team meta-review cycles. Round 1 (PR #93) found 7
+  dead exports + the snapshot-test rubber-stamp pattern. Round 2
+  (PR #99) — broader prompt scope per the recipe shipped in PR #92
+  — found 3 MORE dead exports the round-1 narrower scope missed,
+  plus a Path B cross-doc descope sweep (README + cli-runtime SKILL
+  still described the descoped feature as live). The audit ritual
+  + cadence trigger added in PR #92 codifies the recipe in
+  `CONTRIBUTING.md`.
+- New maintainer memory entries this cycle:
+  `feedback_audit_prompt_scope_determines_findings`,
+  `feedback_iterative_audit_converges_in_2_rounds`,
+  `feedback_snapshot_tests_can_rubber_stamp_stale_literals`.
+
+Test suite: 180 / 179 pass / 1 skipped (was 174 / 173 / 1 at v0.0.21;
++1 from PR #95 probe-timeout coverage, +4 from PR #97 setup-config
+gate flag e2e tests, +1 from PR #100 probe-progress assertion).
+CI green on Ubuntu and Windows across all 16 PRs.
+
+See merged PRs #88-#103 for the full session arc; the canonical
+audit-bundle list lives in `CONTRIBUTING.md → Doc-vs-code audit
+ritual → Past audits` and the per-PR rationale lives in the handoff
+doc's `### Post-v0.0.21 hygiene (untagged)` block.
+
 ## 0.0.21
 
 Single fix surfaced by the v0.0.20 post-release dogfooding smoke

@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Copilot plugins to use in Claude Code for delegation and code review.",
-    "version": "0.0.21"
+    "version": "0.0.22"
   },
   "plugins": [
     {
       "name": "copilot",
       "description": "Use GitHub Copilot CLI from Claude Code to review code or delegate tasks.",
-      "version": "0.0.21",
+      "version": "0.0.22",
       "author": {
         "name": "andyzengmath"
       },
