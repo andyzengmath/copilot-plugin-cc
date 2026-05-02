@@ -126,15 +126,19 @@ const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude t
 
 function printUsage() {
   console.log(
+    // Keep in sync with each plugins/copilot/commands/<cmd>.md `argument-hint`.
     [
       "Usage:",
-      "  node scripts/copilot-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/copilot-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
-      "  node scripts/copilot-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
+      "  node scripts/copilot-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--default-model <name|alias>] [--default-effort <low|medium|high|xhigh>] [--probe-models] [--json]",
+      "  node scripts/copilot-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <name>] [--effort <none|minimal|low|medium|high|xhigh>]",
+      "  node scripts/copilot-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <name>] [--effort <none|minimal|low|medium|high|xhigh>] [focus text]",
       "  node scripts/copilot-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh>] [--prompt-file <path>] [prompt]",
-      "  node scripts/copilot-companion.mjs status [job-id] [--all] [--json]",
+      "  node scripts/copilot-companion.mjs status [job-id] [--wait] [--timeout-ms <ms>] [--all] [--json]",
       "  node scripts/copilot-companion.mjs result [job-id] [--json]",
-      "  node scripts/copilot-companion.mjs cancel [job-id] [--json]"
+      "  node scripts/copilot-companion.mjs cancel [job-id] [--json]",
+      "",
+      "Top-level: --version | -v   prints plugin version from .claude-plugin/plugin.json",
+      "           help | --help    prints this banner"
     ].join("\n")
   );
 }
@@ -1085,6 +1089,16 @@ async function handleCancel(argv) {
 
 async function main() {
   const [subcommand, ...argv] = process.argv.slice(2);
+  if (subcommand === "--version" || subcommand === "-v") {
+    // Print the plugin version from the manifest. Helpful for bug reports
+    // ("plugin says X") so users can confirm which version is installed
+    // without reading .claude-plugin/plugin.json by hand.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const manifestPath = path.join(here, "..", ".claude-plugin", "plugin.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    console.log(manifest.version);
+    return;
+  }
   if (!subcommand || subcommand === "help" || subcommand === "--help") {
     printUsage();
     return;
