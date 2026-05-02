@@ -139,7 +139,7 @@ test("formatActiveModelLine output matches the literal stderr-echo format", () =
   });
   assert.equal(
     cliDefault,
-    "Copilot CLI default (claude-sonnet-4.5) [Copilot CLI default]"
+    "Copilot CLI default (claude-sonnet-4.6) [Copilot CLI default]"
   );
 });
 

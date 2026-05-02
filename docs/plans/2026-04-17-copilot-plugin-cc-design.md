@@ -46,6 +46,8 @@ its entire shape because the replacement `copilot.mjs` matches
 
 Net reuse target: **~60% literal reuse, ~40% swap**. Roughly 1200–1500 LOC
 of new/modified code against the plugin's ~4000 LOC baseline.
+(Original v1 sizing target; the implementation through v0.0.21 has grown
+past this — treat as historical context.)
 
 ## ACP spike findings (2026-04-17)
 
@@ -264,11 +266,21 @@ only change is the string `codex` → `copilot` in rendered output.
 Codex uses a `sandbox: "read-only" | "workspace-write"` flag on every turn.
 Copilot's permissions are set at CLI spawn time, not per-session.
 
-**Broker spawn flags** (once per Claude session):
+**Broker spawn flags** (once per Claude session, updated through v0.0.18; canonical list at `plugins/copilot/scripts/lib/acp-client.mjs::DEFAULT_COPILOT_SPAWN_ARGS`):
 
 ```
-copilot --acp --allow-all-tools --allow-all-paths --add-dir <workspace-root>
+copilot --acp \
+  --allow-all-tools --allow-all-paths --allow-all-urls \
+  --no-ask-user \
+  --secret-env-vars=COPILOT_GITHUB_TOKEN,GH_TOKEN,GITHUB_TOKEN \
+  --deny-tool=shell(curl:*) --deny-tool=shell(wget:*) \
+  --deny-tool=shell(nc:*)   --deny-tool=shell(ncat:*) \
+  --deny-tool=shell(ssh:*)
 ```
+
+(Per-call `-p` invocations — `probeSingleModel` and the review path in
+`runCopilotCli` — additionally append `--add-dir <cwd>`, `--model`, and
+`--effort`. Those are not part of the broker spawn.)
 
 Our ACP broker auto-approves inbound `session/request_permission` messages.
 Read-only review is enforced **by prompt contract**, the same way

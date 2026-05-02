@@ -13,7 +13,7 @@ and never touches real auth, real model IDs, or the real spawn path —
 so a stale alias, a broken broker spawn on Windows, or an upstream
 ACP-version drift can ship green.
 
-```bash
+```text
 # 1. Install + auth + probe
 /copilot:setup --probe-models
 

@@ -466,7 +466,7 @@ export function getActiveCopilotModelInfo({ requestedModel = null, env = process
  */
 export function formatActiveModelLine(info) {
   if (!info) return "";
-  const modelLabel = info.model || "Copilot CLI default (claude-sonnet-4.5)";
+  const modelLabel = info.model || "Copilot CLI default (claude-sonnet-4.6)";
   const effortLabel = info.effortLevel ? `, effort ${info.effortLevel}` : "";
   return `${modelLabel}${effortLabel} [${info.source}]`;
 }
