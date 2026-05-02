@@ -6,7 +6,7 @@
  * is preserved from the Codex port so the downstream companion logic stays
  * largely unchanged. The backend-specific pieces that do change:
  *
- *   - spawn target: `copilot --acp --allow-all-tools --allow-all-paths`
+ *   - spawn target: `copilot --acp` + canonical flag set from `DEFAULT_COPILOT_SPAWN_ARGS` (see below; updated through v0.0.18)
  *   - handshake: ACP `initialize` (no `initialized` notification)
  *   - server-initiated `session/request_permission` is auto-approved
  *   - fs/terminal server-initiated requests are rejected with the capability
