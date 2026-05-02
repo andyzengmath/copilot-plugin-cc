@@ -221,9 +221,10 @@ models (Claude + GPT) before you hit an availability error mid-run:
   JSON + log files, session-scoped via a `SessionStart` hook.
 - Cancels a live run with ACP `session/cancel`; falls back to killing the
   process tree if the session ID is unknown.
-- Cross-Claude-session resume falls back to `copilot -p --continue` when no
-  in-broker session is available (streaming progress degrades to coarse
-  phase transitions).
+- Within a Claude session, the broker reuses the cached Copilot session ID
+  over ACP (full streaming progress). Cross-Claude-session resume was
+  descoped in v1; `render.mjs` emits a `copilot --continue ${sessionId}`
+  hint string so users can recover via the Copilot CLI directly.
 
 See [`docs/plans/2026-04-17-copilot-plugin-cc-design.md`](docs/plans/2026-04-17-copilot-plugin-cc-design.md)
 for the full design, including the Codex-RPC ↔ ACP-v1 mapping table and

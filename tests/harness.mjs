@@ -1,9 +1,6 @@
-import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-
-import { makeTempDir } from "./helpers.mjs";
 
 export const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(TESTS_DIR, "..");
@@ -41,20 +38,4 @@ export function buildCopilotEnv(opts = {}) {
     env.FAKE_COPILOT_SPAWN_LOG = opts.spawnLog;
   }
   return { ...env, ...(opts.extraEnv ?? {}) };
-}
-
-/**
- * Create a workspace + plugin-data directory pair and optionally seed a
- * minimal git repo with a README. Returns {workspace, pluginData}.
- */
-export function makeIsolatedWorkspace({ initGit = false, seedFile = null } = {}) {
-  const workspace = makeTempDir();
-  const pluginData = makeTempDir();
-  if (seedFile) {
-    fs.writeFileSync(path.join(workspace, seedFile.name), seedFile.content);
-  }
-  if (initGit) {
-    // Tests that need git should call initGitRepo + commit separately.
-  }
-  return { workspace, pluginData };
 }

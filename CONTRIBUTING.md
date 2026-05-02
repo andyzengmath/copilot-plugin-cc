@@ -146,7 +146,7 @@ hallucinate line numbers or misquote.
 N is the audit pass number); single commit; PR body lists HIGH / MED /
 LOW findings as a table; references prior audit PRs.
 
-**Past audits:**
+**Past audits** (canonical record of audit-bundle PRs and their deferred-finding follow-ups; for full release history including handoff-bookkeeping PRs see the handoff doc's `### Post-v0.0.21 hygiene (untagged)` block):
 
 - **PR #88** (`c513f33`, 2026-05-01) — first pass: tier 1-5 hygiene
   fixes across user-facing docs + supersession callouts.
@@ -161,6 +161,18 @@ LOW findings as a table; references prior audit PRs.
   marker; `--effort → model` prose historical framing;
   `safe-spawn.mjs` added to design-doc layout; handoff
   post-v0.0.21 hygiene block.
+- **PR #93** (`aedfe20`, 2026-05-02) — fourth pass (this recipe's
+  first user): 7 dead exports purged; `--prompt-file` flag added
+  to `printUsage` + try/catch wrapped. Net -44 LOC. Deferred 4
+  HIGH findings to subsequent passes.
+- **PR #95** (`8ad0310`, 2026-05-02) — closes Team C HIGH #1 from
+  #93's meta-review: probe-timeout test + `hangModels` fixture.
+- **PR #96** (`172d6b2`, 2026-05-02) — closes Team D HIGH H1 +
+  MEDIUM M1 from #93's meta-review: design-doc `### task`
+  subcommand section + `task-worker` / `task-resume-candidate`
+  callouts.
+- **PR #97** (`4c1dbcf`, 2026-05-02) — closes Team C HIGH #2 from
+  #93's meta-review: 4 setup-config flag e2e tests.
 
 Audit-prompt scope is a compounding asset: each pass that surfaces a
 new question class should update the

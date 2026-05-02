@@ -38,7 +38,7 @@ Every other module — `state.mjs`, `tracked-jobs.mjs`, `job-control.mjs`,
 The companion script (`codex-companion.mjs` → `copilot-companion.mjs`) keeps
 its entire shape because the replacement `copilot.mjs` matches
 `codex.mjs`'s public export signatures:
-`runAppServerTurn`, `runAppServerReview`, `interruptAppServerTurn`,
+`runAppServerTurn`, `interruptAppServerTurn`,
 `getCodexAvailability` (renamed `getCopilotAvailability`),
 `getCodexAuthStatus` (renamed `getCopilotAuthStatus`),
 `findLatestTaskThread`, `buildPersistentTaskThreadName`,
