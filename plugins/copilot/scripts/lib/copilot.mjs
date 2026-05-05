@@ -834,6 +834,27 @@ export function isModelUnavailableStderr(text) {
   return MODEL_UNAVAILABLE_RE.test(text);
 }
 
+// Copilot CLI emits this exact pattern when its retry loop (default 5
+// retries) exhausts without getting a response from the AI model — i.e.
+// the backend is unreachable / overloaded / down. The plugin captures
+// this as the "final message" because the CLI prints it to stdout, but
+// it's NOT structured review output. Without this detection,
+// `renderReviewResult` falls back to the generic "did not return valid
+// structured JSON" message, which misleads users into thinking the
+// plugin's parser is broken when the actual cause is server-side.
+//
+// Match the post-exhaust line specifically (rather than any "Response
+// was interrupted" retry-info chatter) — interrupts that recover should
+// NOT be treated as failures. Anchored on the unique "Failed to get
+// response from the AI model" + "retried N times" co-occurrence.
+const COPILOT_TRANSIENT_BACKEND_RE =
+  /Failed\s+to\s+get\s+response\s+from\s+the\s+AI\s+model[\s\S]{0,200}?retried\s+\d+\s+times/i;
+
+export function isCopilotTransientBackendError(text) {
+  if (typeof text !== "string" || !text) return false;
+  return COPILOT_TRANSIENT_BACKEND_RE.test(text);
+}
+
 // Note: the v0.0.6-era `SHELL_METACHAR_RE` / `assertNoShellMetachars` deny-list
 // was removed in v0.0.18 when the spawn paths migrated to `safeSpawn` (see
 // `lib/safe-spawn.mjs`). safeSpawn pre-resolves Windows .cmd launchers and

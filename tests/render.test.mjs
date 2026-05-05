@@ -3,6 +3,45 @@ import assert from "node:assert/strict";
 
 import { renderReviewResult, renderStoredJobResult } from "../plugins/copilot/scripts/lib/render.mjs";
 
+test("renderReviewResult surfaces Copilot backend retry-exhaust as a transient error, not a parser bug", () => {
+  // When Copilot CLI's retry loop exhausts without getting a response
+  // from the AI model, the rawOutput is the post-exhaust error string,
+  // not JSON. Without the dedicated branch in renderReviewResult, this
+  // would render as "Copilot did not return valid structured JSON" +
+  // a JSON.parse error message — misleading users into filing parser
+  // bugs for what is actually a Copilot/server outage.
+  const raw =
+    "Info: Response was interrupted due to a server error. Retrying..." +
+    "Info: Response was interrupted due to a server error. Retrying..." +
+    "Info: Response was interrupted due to a server error. Retrying..." +
+    "Info: Response was interrupted due to a server error. Retrying..." +
+    "Info: Response was interrupted due to a server error. Retrying..." +
+    "Error: Execution failed: Error: Failed to get response from the AI model;" +
+    " retried 5 times (total retry wait time: 5.80 seconds) Last error: Unknown error";
+
+  const output = renderReviewResult(
+    {
+      parsed: null,
+      rawOutput: raw,
+      parseError: "Unexpected token 'I', \"Info: Resp\"... is not valid JSON"
+    },
+    {
+      reviewLabel: "Adversarial Review",
+      targetLabel: "working tree diff"
+    }
+  );
+
+  assert.match(output, /Copilot's backend was unavailable\./);
+  assert.match(output, /retry budget/);
+  assert.match(output, /transient Copilot or upstream-API server issue/);
+  assert.match(output, /Try the command again in a minute or two/);
+  assert.match(output, /githubstatus\.com/);
+  assert.match(output, /Raw final message:/);
+  // Must NOT render the misleading "did not return valid structured JSON"
+  // line for this case — that's the whole point of the dedicated branch.
+  assert.doesNotMatch(output, /did not return valid structured JSON/);
+});
+
 test("renderReviewResult degrades gracefully when JSON is missing required review fields", () => {
   const output = renderReviewResult(
     {
