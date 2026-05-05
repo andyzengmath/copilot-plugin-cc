@@ -1,3 +1,5 @@
+import { isCopilotTransientBackendError } from "./copilot.mjs";
+
 function severityRank(severity) {
   switch (severity) {
     case "critical":
@@ -311,6 +313,33 @@ export function renderSetupReport(report) {
 
 export function renderReviewResult(parsedResult, meta) {
   if (!parsedResult.parsed) {
+    // Copilot CLI's retry loop (default 5 retries) sometimes exhausts
+    // without ever getting a response from the AI model — backend
+    // unreachable / overloaded. The CLI prints "Error: Failed to get
+    // response from the AI model; retried N times" to stdout, which the
+    // plugin captures as the "final message". Without this branch the
+    // generic "did not return valid structured JSON" message implies a
+    // plugin parser bug; surface the real cause instead so users know
+    // to retry rather than file a parser bug. Pattern lives next to
+    // isModelUnavailableStderr in copilot.mjs.
+    if (isCopilotTransientBackendError(parsedResult.rawOutput)) {
+      const lines = [
+        `# Copilot ${meta.reviewLabel}`,
+        "",
+        "Copilot's backend was unavailable. The CLI exhausted its retry budget without getting a response from the AI model — this is typically a transient Copilot or upstream-API server issue, not a plugin problem.",
+        "",
+        "Try the command again in a minute or two. If it persists, check https://www.githubstatus.com or `copilot --version` (the CLI itself may need an update)."
+      ];
+
+      if (parsedResult.rawOutput) {
+        lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+      }
+
+      appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
+
+      return `${lines.join("\n").trimEnd()}\n`;
+    }
+
     const lines = [
       `# Copilot ${meta.reviewLabel}`,
       "",
